@@ -527,14 +527,14 @@ function logout(){
   document.getElementById('loginId').value=''; document.getElementById('loginPw').value='';
   document.getElementById('loginErr').style.display='none';
 }
-const titles={dashboard:'대시보드',orderNew:'주문 등록',orders:'주문 목록',quote:'견적서',clients:'거래처 관리',suppliers:'공급사 관리',products:'상품 관리',forms:'견적서 양식',erp:'매출 ERP',users:'계정 관리'};
+const titles={dashboard:'대시보드',orderNew:'주문 등록',orderEdit:'주문 수정',orders:'주문 목록',quote:'견적서',clients:'거래처 관리',suppliers:'공급사 관리',products:'상품 관리',forms:'견적서 양식',erp:'매출 ERP',users:'계정 관리'};
 function go(page, param, skipHistory){
   currentPage=page;
-  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===(page==='orderEdit'?'orders':page)));
   document.getElementById('pageTitle').textContent=titles[page];
   document.getElementById('bellPanel').classList.remove('open');
   renderBell();
-  const fn=({dashboard:renderDashboard,orderNew:renderOrderNew,orders:renderOrders,quote:()=>renderQuote(param),clients:renderClients,suppliers:renderSuppliers,products:renderProducts,forms:renderForms,erp:renderErp,users:renderUsers})[page];
+  const fn=({dashboard:renderDashboard,orderNew:()=>renderOrderNew(),orderEdit:()=>renderOrderNew(param),orders:renderOrders,quote:()=>renderQuote(param),clients:renderClients,suppliers:renderSuppliers,products:renderProducts,forms:renderForms,erp:renderErp,users:renderUsers})[page];
   try{ const r=fn&&fn(); if(r&&r.catch) r.catch(e=>console.error(page,e)); }catch(e){ console.error(page,e); }
   document.querySelector('.main').scrollTop=0; window.scrollTo(0,0);
   if(!skipHistory){
@@ -1082,32 +1082,37 @@ async function delProd(id){
    주문 등록
 ============================================================ */
 let draftSell=[], draftBuy=[];
-function renderOrderNew(){
-  draftSell=[]; draftBuy=[];
+let editOrderId=null;
+function renderOrderNew(orderId){
+  editOrderId = orderId||null;
+  const eo = orderId ? orders.find(o=>o.id===orderId) : null;
+  draftSell = eo ? eo.items.map(i=>({...i})) : [];
+  draftBuy  = eo ? (eo.buyItems||[]).map(i=>({...i})) : [];
+  const days = eo ? (Math.round((new Date(eo.dueDate+'T00:00:00')-new Date(eo.startDate+'T00:00:00'))/86400000)+1) : 7;
   document.getElementById('content').innerHTML=`
   <div class="card" style="max-width:1040px">
-    <div class="card-h"><h3>새 주문 등록</h3></div>
+    <div class="card-h"><h3>${eo?'주문 수정':'새 주문 등록'}</h3>${eo?`<span style="font-size:12px;color:var(--muted)">등록일 ${eo.date}</span>`:''}</div>
     <div class="card-b">
       <div class="field-row" style="grid-template-columns:1.6fr 1fr;margin-bottom:8px">
         <div class="field"><label>거래처 <span class="req">*</span></label>
-          <select id="o_client" onchange="syncOrderOwner()"><option value="">거래처 선택</option>${myClients().map(c=>`<option value="${c.id}">${esc(c.name)}${c.userId&&currentUser.role==='admin'?' ('+esc(userOf(c.userId)?.name||'')+')':''}</option>`).join('')}</select>
+          <select id="o_client" onchange="syncOrderOwner()"><option value="">거래처 선택</option>${myClients().map(c=>`<option value="${c.id}" ${eo&&eo.clientId===c.id?'selected':''}>${esc(c.name)}${c.userId&&currentUser.role==='admin'?' ('+esc(userOf(c.userId)?.name||'')+')':''}</option>`).join('')}</select>
         </div>
         <div class="field"><label>담당자 <span class="req">*</span></label>
           <select id="o_owner" ${currentUser.role!=='admin'?'disabled':''}>
             ${currentUser.role==='admin'
-              ? users.map(u=>`<option value="${u.id}" ${u.id===currentUser.id?'selected':''}>${esc(u.name)}</option>`).join('')
+              ? users.map(u=>`<option value="${u.id}" ${u.id===(eo?eo.userId:currentUser.id)?'selected':''}>${esc(u.name)}</option>`).join('')
               : `<option value="${currentUser.id}">${esc(currentUser.name)}</option>`}
           </select>
         </div>
       </div>
       <div class="field-row" style="grid-template-columns:1fr .7fr 1fr 1.2fr;margin-bottom:8px">
-        <div class="field"><label>시작일 <span class="req">*</span></label><input type="date" id="o_start" value="${dstr(0)}" onchange="calcDue()"></div>
-        <div class="field"><label>작업 일수</label><input type="number" id="o_days" min="1" value="7" style="text-align:right" oninput="calcDue()"></div>
-        <div class="field"><label>마감일 <span class="req">*</span></label><input type="date" id="o_due" value="${dstr(6)}" onchange="calcDays()"></div>
+        <div class="field"><label>시작일 <span class="req">*</span></label><input type="date" id="o_start" value="${eo?eo.startDate:dstr(0)}" onchange="calcDue()"></div>
+        <div class="field"><label>작업 일수</label><input type="number" id="o_days" min="1" value="${days}" style="text-align:right" oninput="calcDue()"></div>
+        <div class="field"><label>마감일 <span class="req">*</span></label><input type="date" id="o_due" value="${eo?eo.dueDate:dstr(6)}" onchange="calcDays()"></div>
         <div class="field"><label>견적서 양식</label>
           <select id="o_form">
             <option value="">${quoteForms.find(f=>f.isDefault)?'기본 양식 ('+esc(quoteForms.find(f=>f.isDefault).name)+')':'기본 문구'}</option>
-            ${quoteForms.map(f=>`<option value="${f.id}">${esc(f.name)}</option>`).join('')}
+            ${quoteForms.map(f=>`<option value="${f.id}" ${eo&&eo.formId===f.id?'selected':''}>${esc(f.name)}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -1134,7 +1139,7 @@ function renderOrderNew(){
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
         <button class="btn btn-ghost" onclick="go('orders')">취소</button>
-        <button class="btn btn-primary" style="padding:11px 28px" onclick="saveOrder()">주문 저장</button>
+        <button class="btn btn-primary" style="padding:11px 28px" onclick="saveOrder()">${eo?'수정 저장':'주문 저장'}</button>
       </div>
     </div>
   </div>`;
@@ -1143,7 +1148,9 @@ function renderOrderNew(){
 /* 작업 일수 ↔ 마감일 자동 계산 (시작일 포함) */
 /* 거래처 선택 시 그 거래처 담당자를 주문 담당자로 자동 지정 (어드민만 변경 가능) */
 function syncOrderOwner(){
-  if(draftSell.some(l=>l.productId)){
+  const cidNow=parseInt(document.getElementById('o_client').value)||0;
+  const eo=editOrderId?orders.find(o=>o.id===editOrderId):null;
+  if(!(eo&&eo.clientId===cidNow) && draftSell.some(l=>l.productId)){
     draftSell=draftSell.map(l=>l.productId?{...l,productId:null,name:'',price:0}:l);
     renderSellLines(); toast('거래처가 변경되어 선택한 상품이 초기화되었습니다');
   }
@@ -1332,11 +1339,21 @@ async function saveOrder(){
     ? (parseInt(document.getElementById('o_owner').value)||currentUser.id)
     : currentUser.id;
   const formId=parseInt(document.getElementById('o_form').value)||null;
-  const o={clientId, userId, date:dstr(0), startDate, dueDate, status:'진행중', formId,
+  const payload={clientId, userId, startDate, dueDate, formId,
     items:items.map(l=>({productId:l.productId,name:l.name,memo:l.memo,price:l.price,qty:l.qty})),
     buyItems};
-  try{ const row=await dbIns('orders',o); orders.push(row); }catch(e){ return; }
-  toast('주문을 저장했습니다');
+  try{
+    if(editOrderId){
+      await dbUpd('orders',editOrderId,payload);
+      Object.assign(orders.find(o=>o.id===editOrderId),payload);
+      toast('주문을 수정했습니다');
+    }else{
+      const row=await dbIns('orders',{...payload, date:dstr(0), status:'진행중'});
+      orders.push(row);
+      toast('주문을 저장했습니다');
+    }
+  }catch(e){ return; }
+  editOrderId=null;
   go('orders');
 }
 
@@ -1379,13 +1396,13 @@ function renderOrderTable(){
 
   document.getElementById('orderTable').innerHTML = list.length ? `
   <table><thead><tr>
-    <th>마감</th><th>거래처</th><th>품목</th><th class="num">합계(VAT포함)</th><th class="num">마진</th><th>시작일</th><th>마감일</th><th>담당</th><th>상태</th><th style="width:190px"></th>
+    <th>마감</th><th>거래처</th><th>품목</th><th class="num">합계(VAT포함)</th><th class="num">마진</th><th>시작일</th><th>마감일</th><th>담당</th><th>상태</th><th style="width:300px"></th>
   </tr></thead><tbody>
   ${list.map(o=>{
     const c=clientOf(o.clientId); const total=orderTotal(o); const grand=total+Math.round(total*0.1);
     const margin=orderMargin(o);
     const itemLabel=esc(o.items[0].name)+(o.items.length>1?` 외 ${o.items.length-1}건`:'');
-    return `<tr>
+    return `<tr style="cursor:pointer" onclick="orderDetail(${o.id})">
       <td>${dChip(o)}</td>
       <td><b>${esc(c?.name||'-')}</b></td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.items.map(i=>i.name).join(', '))}">${itemLabel}</td>
@@ -1395,13 +1412,52 @@ function renderOrderTable(){
       <td>${esc(userOf(o.userId)?.name||'-')}</td>
       <td><span class="status-pill ${o.status==='완료'?'st-done':'st-ing'}">${o.status}</span></td>
       <td style="text-align:right;white-space:nowrap">
-        <button class="mini-btn blue" onclick="go('quote',${o.id})">견적서</button>
-        <button class="mini-btn" onclick="toggleStatus(${o.id})">${o.status==='완료'?'진행중으로':'완료 처리'}</button>
-        <button class="mini-btn red" onclick="delOrder(${o.id})">삭제</button>
+        <button class="mini-btn" onclick="event.stopPropagation();orderDetail(${o.id})">상세</button>
+        <button class="mini-btn blue" onclick="event.stopPropagation();go('orderEdit',${o.id})">수정</button>
+        <button class="mini-btn blue" onclick="event.stopPropagation();go('quote',${o.id})">견적서</button>
+        <button class="mini-btn" onclick="event.stopPropagation();toggleStatus(${o.id})">${o.status==='완료'?'진행중으로':'완료'}</button>
+        <button class="mini-btn red" onclick="event.stopPropagation();delOrder(${o.id})">삭제</button>
       </td></tr>`;
   }).join('')}
   </tbody></table>` : '<div class="empty">조건에 맞는 주문이 없습니다.</div>';
 }
+/* 주문 상세 보기 */
+function orderDetail(id){
+  const o=orders.find(x=>x.id===id);
+  if(!o) return;
+  const c=clientOf(o.clientId);
+  const supply=orderTotal(o), cost=orderCost(o), margin=supply-cost, vat=Math.round(supply*0.1);
+  openModal(`
+  <div class="modal-h"><h3>주문 상세 · ${esc(c?.name||'-')}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b" style="max-height:65vh;overflow:auto">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:13px;margin-bottom:16px">
+      <div><b style="color:var(--muted)">등록일</b> ${o.date}</div>
+      <div><b style="color:var(--muted)">담당자</b> ${esc(userOf(o.userId)?.name||'-')}</div>
+      <div><b style="color:var(--muted)">납품기간</b> ${o.startDate} ~ ${o.dueDate}</div>
+      <div><b style="color:var(--muted)">상태</b> <span class="status-pill ${o.status==='완료'?'st-done':'st-ing'}">${o.status}</span> ${dChip(o)}</div>
+    </div>
+    <div class="sec-head"><span class="t sell">🛒 판매 상품</span></div>
+    <table style="margin-bottom:14px"><thead><tr><th>품목</th><th>메모</th><th class="num">단가</th><th class="num">수량</th><th class="num">합계</th></tr></thead><tbody>
+      ${o.items.map(i=>`<tr><td><b>${esc(i.name)}</b></td><td style="color:var(--muted)">${esc(i.memo)||'-'}</td><td class="num">${wonS(i.price)}</td><td class="num">${i.qty}</td><td class="num"><b>${wonS(i.price*i.qty)}</b></td></tr>`).join('')}
+    </tbody></table>
+    <div class="sec-head"><span class="t buy">🚚 공급사 주문 (매입)</span></div>
+    ${(o.buyItems||[]).length?`<table style="margin-bottom:14px"><thead><tr><th>공급사 상품</th><th>메모</th><th class="num">원가</th><th class="num">수량</th><th class="num">합계</th></tr></thead><tbody>
+      ${o.buyItems.map(i=>`<tr><td><b>${esc(i.spName||'직접 매입')}</b></td><td style="color:var(--muted)">${esc(i.memo)||'-'}</td><td class="num">${wonS(i.cost)}</td><td class="num">${i.qty}</td><td class="num" style="color:var(--amber)"><b>${wonS(i.cost*i.qty)}</b></td></tr>`).join('')}
+    </tbody></table>`:'<div style="color:var(--muted);font-size:13px;padding:8px 0 14px">매입 내역이 없습니다.</div>'}
+    <div class="order-total" style="flex-wrap:wrap;border-top:1px solid var(--line);padding-top:14px">
+      <span>공급가액 <b>${won(supply)}</b></span>
+      <span>원가 <b style="color:var(--amber)">${won(cost)}</b></span>
+      <span>마진 <b class="${margin>=0?'margin-pos':'margin-neg'}">${won(margin)}</b> <span style="font-size:12px;color:var(--muted)">(${supply>0?Math.round(margin/supply*100):0}%)</span></span>
+      <span>부가세 <b>${won(vat)}</b></span>
+      <span class="grand">합계 <b>${won(supply+vat)}</b></span>
+    </div>
+  </div>
+  <div class="modal-f">
+    <button class="btn btn-ghost" onclick="closeModal();go('quote',${o.id})">견적서 보기</button>
+    <button class="btn btn-primary" onclick="closeModal();go('orderEdit',${o.id})">주문 수정</button>
+  </div>`, true);
+}
+
 async function toggleStatus(id){
   const o=orders.find(o=>o.id===id);
   const next=o.status==='완료'?'진행중':'완료';
