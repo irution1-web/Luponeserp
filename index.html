@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 :root{
   --ink:#17223B;          /* 사이드바 딥 네이비 */
@@ -268,11 +269,6 @@ th.num{text-align:right}
     <input id="loginPw" type="password" placeholder="비밀번호 입력" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
     <div class="login-err" id="loginErr">아이디 또는 비밀번호가 올바르지 않습니다.</div>
     <button class="btn btn-primary btn-block" onclick="doLogin()">로그인</button>
-    <div class="login-hint">
-      <b>데모 계정</b><br>
-      슈퍼어드민 &nbsp;<code>admin / 1234</code><br>
-      팀원 &nbsp;<code>kim / 1234</code> · <code>lee / 1234</code>
-    </div>
   </div>
 </div>
 
@@ -304,12 +300,15 @@ th.num{text-align:right}
   <div class="main">
     <div class="topbar">
       <h2 id="pageTitle">대시보드</h2>
+      <div style="display:flex;align-items:center;gap:8px">
+      <button class="bell-btn" onclick="refreshData()" title="최신 데이터 불러오기" aria-label="새로고침">⟳</button>
       <div class="bell-wrap">
         <button class="bell-btn" onclick="toggleBell(event)" aria-label="마감 알림">🔔<span class="bell-badge" id="bellBadge" style="display:none">0</span></button>
         <div class="bell-panel" id="bellPanel">
           <div class="bell-head">마감 알림 <span style="color:var(--muted);font-weight:500">· 3일 이내 마감 및 초과 건</span></div>
           <div id="bellList"></div>
         </div>
+      </div>
       </div>
     </div>
     <div class="content" id="content"></div>
@@ -332,69 +331,41 @@ const today = new Date(); today.setHours(0,0,0,0);
 function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); } // 로컬 기준 날짜 문자열 (UTC 변환 X)
 function dstr(offset){ const d=new Date(today); d.setDate(d.getDate()+offset); return ymd(d); }
 
-/* rate: 정산율(%) — 마진(판매-원가) × rate% = 정산금 */
-let users = [
-  {id:1, username:'admin', pw:'1234', name:'관리자', role:'admin',  rate:0},
-  {id:2, username:'kim',   pw:'1234', name:'김민수', role:'member', rate:30},
-  {id:3, username:'lee',   pw:'1234', name:'이서연', role:'member', rate:25},
-];
+/* ============================================================
+   Supabase 연동 (데이터 영구 저장 · 팀 공유)
+============================================================ */
+const SB_URL='https://szmenayblndgwjitqtww.supabase.co';
+const SB_KEY='sb_publishable_BLlvvY7I-MKv2pAwYSSFdA_OYKO1Khg';
+const sb = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 
-/* userId: 거래처 담당 직원 */
-let clients = [
-  {id:1, bizNo:'123-45-67890', name:'(주)한빛상사',   ceo:'박한빛', phone:'02-1234-5678',  email:'contact@hanbit.co.kr', userId:2},
-  {id:2, bizNo:'220-81-45678', name:'대성테크',       ceo:'최대성', phone:'031-987-6543', email:'sales@daesung.kr',     userId:3},
-  {id:3, bizNo:'305-12-88991', name:'미래유통(주)',   ceo:'정미래', phone:'010-5555-2222', email:'order@mirae.com',      userId:2},
-];
+let users=[], clients=[], suppliers=[], supProducts=[], categories=[], products=[], orders=[], notifications=[];
 
-/* 공급사 (매입처) & 공급사 서비스 상품 */
-let suppliers = [
-  {id:1, name:'애드플랫폼(주)', bizNo:'401-88-11223', phone:'02-777-1234', email:'biz@adplatform.kr'},
-  {id:2, name:'프린트팩토리',   bizNo:'128-45-99887', phone:'031-555-8899', email:'order@printfactory.co.kr'},
-];
-let supProducts = [
-  {id:1, supId:1, name:'SNS 광고 대행 (월)',  cost:150000},
-  {id:2, supId:1, name:'키워드 광고 세팅',    cost:80000},
-  {id:3, supId:2, name:'전단지 인쇄 (1000부)', cost:45000},
-  {id:4, supId:2, name:'현수막 제작',         cost:30000},
-];
-
-let categories = [
-  {id:1, name:'사무용품'},
-  {id:2, name:'전자기기'},
-  {id:3, name:'소모품'},
-];
-/* clientId: 상품 공급 거래처 (null = 거래처 없음 · 자체상품) */
-let products = [
-  {id:1, catId:1, name:'A4 복사용지 (박스)',   price:23000,  clientId:1},
-  {id:2, catId:1, name:'3단 서류함',           price:45000,  clientId:1},
-  {id:3, catId:2, name:'27인치 모니터',        price:280000, clientId:2},
-  {id:4, catId:2, name:'무선 키보드/마우스 세트', price:65000, clientId:2},
-  {id:5, catId:3, name:'토너 카트리지 (검정)',  price:89000,  clientId:3},
-  {id:6, catId:3, name:'제본 스프링 (100입)',   price:12000,  clientId:null},
-];
-
-/* 주문: items = [{productId, name, memo, price, qty}] */
-let orders = [
-  {id:1, clientId:1, userId:2, date:dstr(-6), startDate:dstr(-6), dueDate:dstr(1),  status:'진행중',
-   items:[{productId:3,name:'27인치 모니터',memo:'벽걸이 브라켓 포함',price:280000,qty:4},{productId:4,name:'무선 키보드/마우스 세트',memo:'',price:65000,qty:4}],
-   buyItems:[{spId:1,spName:'애드플랫폼(주) · SNS 광고 대행 (월)',memo:'',cost:150000,qty:4}]},
-  {id:2, clientId:2, userId:3, date:dstr(-10), startDate:dstr(-10), dueDate:dstr(-2), status:'진행중',
-   items:[{productId:5,name:'토너 카트리지 (검정)',memo:'긴급 납품',price:89000,qty:10}],
-   buyItems:[{spId:3,spName:'프린트팩토리 · 전단지 인쇄 (1000부)',memo:'',cost:45000,qty:10}]},
-  {id:3, clientId:3, userId:2, date:dstr(-3), startDate:dstr(-3), dueDate:dstr(8),  status:'진행중',
-   items:[{productId:1,name:'A4 복사용지 (박스)',memo:'',price:23000,qty:30},{productId:6,name:'제본 스프링 (100입)',memo:'',price:12000,qty:5}],
-   buyItems:[{spId:4,spName:'프린트팩토리 · 현수막 제작',memo:'',cost:15000,qty:30}]},
-  {id:4, clientId:1, userId:3, date:dstr(-35), startDate:dstr(-35), dueDate:dstr(-25), status:'완료',
-   items:[{productId:2,name:'3단 서류함',memo:'',price:45000,qty:12}],
-   buyItems:[{spId:null,spName:'직접 매입',memo:'',cost:22000,qty:12}]},
-  {id:5, clientId:2, userId:2, date:dstr(-60), startDate:dstr(-60), dueDate:dstr(-50), status:'완료',
-   items:[{productId:3,name:'27인치 모니터',memo:'',price:275000,qty:6},{productId:5,name:'토너 카트리지 (검정)',memo:'',price:89000,qty:3}],
-   buyItems:[{spId:1,spName:'애드플랫폼(주) · SNS 광고 대행 (월)',memo:'',cost:150000,qty:6},{spId:2,spName:'애드플랫폼(주) · 키워드 광고 세팅',memo:'',cost:80000,qty:3}]},
-];
-let seq = {client:4, cat:4, prod:7, order:6, user:4, notif:1, sup:3, supProd:5};
-
-/* 관리자 → 직원 피드백 요청 알림 */
-let notifications = []; // {id, toUserId, orderId, fromName, sentAt, read}
+async function dbIns(t,row){
+  const {data,error}=await sb.from(t).insert(row).select().single();
+  if(error){ console.error(t,error); toast('저장 실패: '+(error.message||'서버 오류')); throw error; }
+  return data;
+}
+async function dbUpd(t,id,patch){
+  const {error}=await sb.from(t).update(patch).eq('id',id);
+  if(error){ console.error(t,error); toast('수정 실패: '+(error.message||'서버 오류')); throw error; }
+}
+async function dbDel(t,id){
+  const {error}=await sb.from(t).delete().eq('id',id);
+  if(error){ console.error(t,error); toast('삭제 실패: '+(error.message||'서버 오류')); throw error; }
+}
+async function loadAll(){
+  const tables=['users','clients','suppliers','supProducts','categories','products','orders','notifications'];
+  const res=await Promise.all(tables.map(t=>sb.from(t).select('*').order('id')));
+  for(let i=0;i<res.length;i++){
+    if(res[i].error){ console.error(tables[i],res[i].error); toast('데이터를 불러오지 못했습니다: '+tables[i]); return false; }
+  }
+  [users,clients,suppliers,supProducts,categories,products,orders,notifications]=res.map(r=>r.data||[]);
+  return true;
+}
+async function refreshData(){
+  toast('데이터를 새로고침하는 중...');
+  if(await loadAll()){ go(currentPage); toast('최신 데이터로 갱신했습니다'); }
+}
 
 const supplier = {name:'주식회사 루폰스', bizNo:'569-88-02994', ceo:'유재덕', addr:'경기도 파주시 중앙로 291, 4층', phone:'', email:''};
 
@@ -437,12 +408,21 @@ function toast(msg){
 /* ============================================================
    로그인 / 네비게이션
 ============================================================ */
-function doLogin(){
+async function doLogin(){
   const id=document.getElementById('loginId').value.trim();
   const pw=document.getElementById('loginPw').value;
-  const u=users.find(u=>u.username===id && u.pw===pw);
-  if(!u){ document.getElementById('loginErr').style.display='block'; return; }
-  currentUser=u;
+  const err=document.getElementById('loginErr');
+  err.style.display='none';
+  if(!sb){ err.textContent='서버 연결 모듈을 불러오지 못했습니다. 인터넷 연결을 확인하세요.'; err.style.display='block'; return; }
+  const btn=document.querySelector('#loginView .btn-block');
+  btn.disabled=true; btn.textContent='로그인 중...';
+  try{
+    const {data:u,error}=await sb.from('users').select('*').eq('username',id).eq('pw',pw).maybeSingle();
+    if(error){ err.textContent='서버 연결에 실패했습니다. 잠시 후 다시 시도하세요.'; err.style.display='block'; return; }
+    if(!u){ err.textContent='아이디 또는 비밀번호가 올바르지 않습니다.'; err.style.display='block'; return; }
+    currentUser=u;
+    if(!await loadAll()){ currentUser=null; err.textContent='데이터를 불러오지 못했습니다.'; err.style.display='block'; return; }
+  } finally { btn.disabled=false; btn.textContent='로그인'; }
   document.getElementById('loginView').style.display='none';
   document.getElementById('appView').style.display='block';
   document.getElementById('sideUserName').textContent=u.name;
@@ -453,10 +433,11 @@ function doLogin(){
 }
 
 /* 관리자 피드백 요청 알림 */
-function sendPing(userId, orderId){
+async function sendPing(userId, orderId){
   if(currentUser.role!=='admin'){ toast('알림 전송은 슈퍼어드민만 가능합니다'); return; }
   if(notifications.some(n=>n.orderId===orderId&&n.toUserId===userId&&!n.read)){ toast('이미 알림을 보냈습니다'); return; }
-  notifications.push({id:seq.notif++, toUserId:userId, orderId, fromName:currentUser.name, sentAt:ymd(today), read:false});
+  const row=await dbIns('notifications',{toUserId:userId, orderId, fromName:currentUser.name, sentAt:ymd(today), read:false});
+  notifications.push(row);
   toast(`${userOf(userId)?.name||''}님에게 알림을 보냈습니다`);
   renderDashboard(); // '전송됨' 표시 갱신
   const acc=document.getElementById('staff-'+userId); if(acc) acc.classList.add('open');
@@ -487,9 +468,10 @@ function showFeedbackPopup(){
     <button class="btn btn-primary" onclick="readPings();go('orders')">주문 확인하러 가기</button>
   </div>`, true);
 }
-function readPings(){
+async function readPings(){
   notifications.forEach(n=>{ if(n.toUserId===currentUser.id) n.read=true; });
   closeModal();
+  await sb.from('notifications').update({read:true}).eq('toUserId',currentUser.id);
 }
 function logout(){
   currentUser=null;
@@ -692,19 +674,22 @@ function clientForm(id){
   </div>
   <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveClient(${id||0})">저장</button></div>`);
 }
-function saveClient(id){
+async function saveClient(id){
   const v=k=>document.getElementById('f_'+k).value.trim();
   if(!v('biz')||!v('name')||!v('ceo')||!v('phone')){ toast('필수 항목을 입력하세요'); return; }
   const userId=parseInt(document.getElementById('f_owner').value)||currentUser.id;
   const data={bizNo:v('biz'),name:v('name'),ceo:v('ceo'),phone:v('phone'),email:v('email'),userId};
-  if(id){ Object.assign(clientOf(id),data); toast('거래처 정보를 수정했습니다'); }
-  else{ clients.push({id:seq.client++, ...data}); toast('거래처를 등록했습니다'); }
+  try{
+    if(id){ await dbUpd('clients',id,data); Object.assign(clientOf(id),data); toast('거래처 정보를 수정했습니다'); }
+    else{ const row=await dbIns('clients',data); clients.push(row); toast('거래처를 등록했습니다'); }
+  }catch(e){ return; }
   closeModal(); renderClients();
 }
-function delClient(id){
+async function delClient(id){
   if(orders.some(o=>o.clientId===id)){ toast('주문 이력이 있는 거래처는 삭제할 수 없습니다'); return; }
   if(products.some(p=>p.clientId===id)){ toast('이 거래처가 등록된 상품이 있어 삭제할 수 없습니다'); return; }
   if(!confirm('이 거래처를 삭제할까요?')) return;
+  try{ await dbDel('clients',id); }catch(e){ return; }
   clients=clients.filter(c=>c.id!==id); renderClients(); toast('삭제했습니다');
 }
 
@@ -764,18 +749,21 @@ function supForm(id){
   </div>
   <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveSup(${id||0})">저장</button></div>`);
 }
-function saveSup(id){
+async function saveSup(id){
   const name=document.getElementById('f_sname').value.trim();
   if(!name){ toast('공급사명을 입력하세요'); return; }
   const data={name, bizNo:document.getElementById('f_sbiz').value.trim(), phone:document.getElementById('f_sphone').value.trim(), email:document.getElementById('f_semail').value.trim()};
-  if(id){ Object.assign(suppliers.find(s=>s.id===id),data); toast('공급사 정보를 수정했습니다'); }
-  else{ suppliers.push({id:seq.sup++, ...data}); toast('공급사를 등록했습니다'); }
+  try{
+    if(id){ await dbUpd('suppliers',id,data); Object.assign(suppliers.find(x=>x.id===id),data); toast('공급사 정보를 수정했습니다'); }
+    else{ const row=await dbIns('suppliers',data); suppliers.push(row); toast('공급사를 등록했습니다'); }
+  }catch(e){ return; }
   closeModal(); renderSuppliers();
 }
-function delSup(id){
+async function delSup(id){
   if(currentUser.role!=='admin'){ toast('공급사 삭제는 슈퍼어드민만 가능합니다'); return; }
   if(supProducts.some(p=>p.supId===id)){ toast('서비스 상품이 있는 공급사는 삭제할 수 없습니다'); return; }
   if(!confirm('이 공급사를 삭제할까요?')) return;
+  try{ await dbDel('suppliers',id); }catch(e){ return; }
   suppliers=suppliers.filter(s=>s.id!==id); renderSuppliers(); toast('삭제했습니다');
 }
 function supProdForm(supId, pid){
@@ -789,18 +777,21 @@ function supProdForm(supId, pid){
   </div>
   <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveSupProd(${supId},${pid||0})">저장</button></div>`);
 }
-function saveSupProd(supId,pid){
+async function saveSupProd(supId,pid){
   const name=document.getElementById('f_spname').value.trim();
   const cost=parseInt(document.getElementById('f_spcost').value)||0;
   if(!name||cost<=0){ toast('상품명과 원가를 입력하세요'); return; }
-  if(pid){ Object.assign(supProducts.find(p=>p.id===pid),{name,cost}); toast('서비스 상품을 수정했습니다'); }
-  else{ supProducts.push({id:seq.supProd++, supId, name, cost}); toast('서비스 상품을 등록했습니다'); }
+  try{
+    if(pid){ await dbUpd('supProducts',pid,{name,cost}); Object.assign(supProducts.find(p=>p.id===pid),{name,cost}); toast('서비스 상품을 수정했습니다'); }
+    else{ const row=await dbIns('supProducts',{supId,name,cost}); supProducts.push(row); toast('서비스 상품을 등록했습니다'); }
+  }catch(e){ return; }
   closeModal(); renderSuppliers();
   document.getElementById('sup-'+supId)?.classList.add('open');
 }
-function delSupProd(id){
+async function delSupProd(id){
   if(currentUser.role!=='admin'){ toast('삭제는 슈퍼어드민만 가능합니다'); return; }
   if(!confirm('이 서비스 상품을 삭제할까요?')) return;
+  try{ await dbDel('supProducts',id); }catch(e){ return; }
   supProducts=supProducts.filter(p=>p.id!==id); renderSuppliers(); toast('삭제했습니다');
 }
 
@@ -856,15 +847,17 @@ function catForm(){
   <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveCat()">추가</button></div>`);
   setTimeout(()=>document.getElementById('f_cat').focus(),50);
 }
-function saveCat(){
+async function saveCat(){
   const name=document.getElementById('f_cat').value.trim();
   if(!name){ toast('카테고리명을 입력하세요'); return; }
-  categories.push({id:seq.cat++, name}); closeModal(); renderProducts(); toast('카테고리를 추가했습니다');
+  try{ const row=await dbIns('categories',{name}); categories.push(row); }catch(e){ return; }
+  closeModal(); renderProducts(); toast('카테고리를 추가했습니다');
 }
-function delCat(id){
+async function delCat(id){
   if(currentUser.role!=='admin'){ toast('카테고리 삭제는 슈퍼어드민만 가능합니다'); return; }
   if(products.some(p=>p.catId===id)){ toast('상품이 있는 카테고리는 삭제할 수 없습니다'); return; }
   if(!confirm('이 카테고리를 삭제할까요?')) return;
+  try{ await dbDel('categories',id); }catch(e){ return; }
   categories=categories.filter(c=>c.id!==id); renderProducts(); toast('삭제했습니다');
 }
 function prodForm(catId, pid){
@@ -884,21 +877,24 @@ function prodForm(catId, pid){
   </div>
   <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveProd(${catId},${pid||0})">저장</button></div>`);
 }
-function saveProd(catId,pid){
+async function saveProd(catId,pid){
   if(currentUser.role!=='admin'){ toast('상품 등록·수정은 슈퍼어드민만 가능합니다'); return; }
   const name=document.getElementById('f_pname').value.trim();
   const price=parseInt(document.getElementById('f_pprice').value)||0;
   const cv=document.getElementById('f_pclient').value;
   const clientId=cv?parseInt(cv):null;
   if(!name||price<=0){ toast('상품명과 판매가를 입력하세요'); return; }
-  if(pid){ Object.assign(products.find(p=>p.id===pid),{name,price,clientId}); toast('상품을 수정했습니다'); }
-  else{ products.push({id:seq.prod++, catId, name, price, clientId}); toast('상품을 등록했습니다'); }
+  try{
+    if(pid){ await dbUpd('products',pid,{name,price,clientId}); Object.assign(products.find(p=>p.id===pid),{name,price,clientId}); toast('상품을 수정했습니다'); }
+    else{ const row=await dbIns('products',{catId,name,price,clientId}); products.push(row); toast('상품을 등록했습니다'); }
+  }catch(e){ return; }
   closeModal(); renderProducts();
   document.getElementById('acc-'+catId)?.classList.add('open');
 }
-function delProd(id){
+async function delProd(id){
   if(currentUser.role!=='admin'){ toast('상품 삭제는 슈퍼어드민만 가능합니다'); return; }
   if(!confirm('이 상품을 삭제할까요?')) return;
+  try{ await dbDel('products',id); }catch(e){ return; }
   products=products.filter(p=>p.id!==id); renderProducts(); toast('삭제했습니다');
 }
 
@@ -1080,7 +1076,7 @@ function pickSupProduct(lineIdx, spid){
   }
   closeModal(); renderBuyLines();
 }
-function saveOrder(){
+async function saveOrder(){
   const clientId=parseInt(document.getElementById('o_client').value);
   const startDate=document.getElementById('o_start').value;
   const dueDate=document.getElementById('o_due').value;
@@ -1090,10 +1086,10 @@ function saveOrder(){
   const items=draftSell.filter(l=>l.productId&&l.qty>0);
   if(!items.length){ toast('판매 상품을 1개 이상 추가하세요'); return; }
   const buyItems=draftBuy.filter(l=>(l.spId||l.cost>0)&&l.qty>0).map(l=>({spId:l.spId==='direct'?null:l.spId,spName:l.spName||'직접 매입',memo:l.memo,cost:l.cost||0,qty:l.qty}));
-  const o={id:seq.order++, clientId, userId:currentUser.id, date:dstr(0), startDate, dueDate, status:'진행중',
+  const o={clientId, userId:currentUser.id, date:dstr(0), startDate, dueDate, status:'진행중',
     items:items.map(l=>({productId:l.productId,name:l.name,memo:l.memo,price:l.price,qty:l.qty})),
     buyItems};
-  orders.push(o);
+  try{ const row=await dbIns('orders',o); orders.push(row); }catch(e){ return; }
   toast('주문을 저장했습니다');
   go('orders');
 }
@@ -1160,14 +1156,17 @@ function renderOrderTable(){
   }).join('')}
   </tbody></table>` : '<div class="empty">조건에 맞는 주문이 없습니다.</div>';
 }
-function toggleStatus(id){
+async function toggleStatus(id){
   const o=orders.find(o=>o.id===id);
-  o.status=o.status==='완료'?'진행중':'완료';
+  const next=o.status==='완료'?'진행중':'완료';
+  try{ await dbUpd('orders',id,{status:next}); }catch(e){ return; }
+  o.status=next;
   renderOrderTable(); renderBell();
-  toast(o.status==='완료'?'완료 처리했습니다':'진행중으로 변경했습니다');
+  toast(next==='완료'?'완료 처리했습니다':'진행중으로 변경했습니다');
 }
-function delOrder(id){
+async function delOrder(id){
   if(!confirm('이 주문을 삭제할까요?')) return;
+  try{ await dbDel('orders',id); }catch(e){ return; }
   orders=orders.filter(o=>o.id!==id); renderOrderTable(); renderBell(); toast('삭제했습니다');
 }
 
@@ -1487,9 +1486,10 @@ function rateForm(userId){
   </div>
   <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveRate(${userId})">저장</button></div>`);
 }
-function saveRate(userId){
+async function saveRate(userId){
   const rate=parseInt(document.getElementById('f_rate').value);
   if(isNaN(rate)||rate<0||rate>100){ toast('0~100 사이의 정산율을 입력하세요'); return; }
+  try{ await dbUpd('users',userId,{rate}); }catch(e){ return; }
   userOf(userId).rate=rate;
   closeModal();
   if(currentPage==='erp') drawErp(); else if(currentPage==='users') renderUsers();
@@ -1635,7 +1635,7 @@ function userForm(){
   </div>
   <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveUser()">생성</button></div>`);
 }
-function saveUser(){
+async function saveUser(){
   const name=document.getElementById('f_uname').value.trim();
   const uid=document.getElementById('f_uid').value.trim();
   const pw=document.getElementById('f_upw').value;
@@ -1643,12 +1643,13 @@ function saveUser(){
   if(!name||!uid||!pw){ toast('모든 항목을 입력하세요'); return; }
   if(users.some(u=>u.username===uid)){ toast('이미 사용 중인 아이디입니다'); return; }
   const rate=Math.min(100,Math.max(0,parseInt(document.getElementById('f_urate').value)||0));
-  users.push({id:seq.user++, username:uid, pw, name, role, rate});
+  try{ const row=await dbIns('users',{username:uid, pw, name, role, rate}); users.push(row); }catch(e){ return; }
   closeModal(); renderUsers(); toast('계정을 생성했습니다');
 }
-function delUser(id){
+async function delUser(id){
   if(orders.some(o=>o.userId===id)){ toast('주문 이력이 있는 계정은 삭제할 수 없습니다'); return; }
   if(!confirm('이 계정을 삭제할까요?')) return;
+  try{ await dbDel('users',id); }catch(e){ return; }
   users=users.filter(u=>u.id!==id); renderUsers(); toast('삭제했습니다');
 }
 </script>
