@@ -226,7 +226,12 @@ th.num{text-align:right}
 .quote-items th{background:#F4F5F1;color:#444;text-align:center;padding:9px}
 .quote-items td{padding:9px 10px}
 .quote-items tfoot td{font-weight:800;background:#FBFBF7}
-.quote-note{margin-top:20px;font-size:12px;color:var(--muted);line-height:1.8}
+.quote-bank{display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:12px;margin-top:16px}
+.quote-bank .bk{padding:12px 14px;background:#F4F5F1;border:1px solid var(--line);text-align:center;white-space:nowrap}
+.quote-bank .bk .lb{font-size:12px;font-weight:700;color:#666;display:block;margin-bottom:4px}
+.quote-bank .bk .vl{font-size:16px;font-weight:800;color:var(--ink)}
+.quote-bank .bk.acct .vl{color:var(--stamp);letter-spacing:.01em}
+.quote-note{margin-top:16px;font-size:13.5px;color:#22262E;line-height:2;padding:16px 18px;border:1px solid var(--line);background:#FBFBF7;font-weight:500}
 .quote-total-line{margin:18px 0;padding:12px 16px;background:#F4F5F1;border:1px solid var(--line);font-weight:800;font-size:15px;display:flex;justify-content:space-between;white-space:nowrap;gap:12px}
 .quote-headline{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:18px 0}
 .quote-box{padding:12px 16px;background:#F4F5F1;border:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;white-space:nowrap;gap:10px}
@@ -234,6 +239,7 @@ th.num{text-align:right}
 .quote-box .vl{font-weight:800;font-size:16px;color:var(--ink)}
 .quote-box.total .vl{font-size:18px}
 .quote-note{white-space:nowrap}
+.quote-bank-title{font-size:13px;font-weight:800;color:var(--ink);margin:20px 0 8px}
 
 /* 차트 */
 .bar-chart{display:flex;align-items:flex-end;gap:10px;height:180px;padding:10px 4px 0}
@@ -373,7 +379,8 @@ async function refreshData(){
   if(await loadAll()){ go(currentPage); toast('최신 데이터로 갱신했습니다'); }
 }
 
-const supplier = {name:'주식회사 루폰스', bizNo:'569-88-02994', ceo:'유재덕', addr:'경기도 파주시 중앙로 291, 4층', phone:'', email:''};
+const supplier = {name:'주식회사 루폰스', bizNo:'569-88-02994', ceo:'유재덕', addr:'경기도 파주시 중앙로 291, 4층', phone:'', email:'',
+  bank:'신한은행', account:'140-014-305735', holder:'주식회사 루폰스'};
 
 let currentUser = null;
 let currentPage = 'dashboard';
@@ -1387,18 +1394,24 @@ function drawQuote(id){
         <tr><td colspan="5" style="text-align:right">총 합계</td><td class="num" style="color:var(--stamp)">₩ ${wonS(grand)}</td></tr>
       </tfoot>
     </table>
+    <div class="quote-bank-title">입금 계좌 안내</div>
+    <div class="quote-bank">
+      <div class="bk"><span class="lb">은행명</span><span class="vl">${esc(supplier.bank)}</span></div>
+      <div class="bk acct"><span class="lb">계좌번호</span><span class="vl">${esc(supplier.account)}</span></div>
+      <div class="bk"><span class="lb">예금주</span><span class="vl">${esc(supplier.holder)}</span></div>
+    </div>
     <div class="quote-note">${quoteNoteHtml(o)}</div>
   </div>`;
 }
 
-const DEFAULT_NOTE='결제조건: 납품 후 세금계산서 발행, 익월 말 현금 결제\n본 견적은 발행일로부터 30일간 유효하며, 이후 단가는 변동될 수 있습니다.';
+const DEFAULT_NOTE='결제조건: 납품 후 세금계산서 발행, 익월 말 현금 결제\n본 견적은 발행일로부터 30일간 유효하며, 이후 단가는 변동될 수 있습니다.\n결제 완료 후 담당자에게 말씀 주시면 당일 오후에 계산서가 발행됩니다.';
 function quoteFormOf(o){
   return quoteForms.find(f=>f.id===o.formId) || quoteForms.find(f=>f.isDefault) || null;
 }
 function quoteNoteHtml(o){
   const f=quoteFormOf(o);
   const text=(f?f.note:DEFAULT_NOTE)||'';
-  return text.split('\n').filter(l=>l.trim()).map(l=>'· '+esc(l.trim())).join('<br>');
+  return text.split('\n').filter(l=>l.trim()).map(l=>esc(l.trim())).join('<br>');
 }
 
 /* 견적서 이미지 복사 */
@@ -1447,7 +1460,7 @@ function renderForms(){
   ${quoteForms.length ? `<table><thead><tr><th style="width:150px">양식명</th><th>안내 문구</th><th style="width:80px">기본</th><th style="width:180px"></th></tr></thead><tbody>
   ${quoteForms.map(f=>`<tr>
     <td><b>${esc(f.name)}</b></td>
-    <td style="white-space:normal;color:var(--muted);font-size:13px;line-height:1.7">${(f.note||'').split('\n').filter(l=>l.trim()).map(l=>'· '+esc(l.trim())).join('<br>')||'<span style="color:var(--muted)">문구 없음</span>'}</td>
+    <td style="white-space:normal;color:var(--text);font-size:13px;line-height:1.7">${(f.note||'').split('\n').filter(l=>l.trim()).map(l=>esc(l.trim())).join('<br>')||'<span style="color:var(--muted)">문구 없음</span>'}</td>
     <td>${f.isDefault?'<span class="status-pill st-done">기본</span>':`<button class="mini-btn" onclick="setDefaultForm(${f.id})">기본 지정</button>`}</td>
     <td style="text-align:right;white-space:nowrap">
       <button class="mini-btn blue" onclick="formForm(${f.id})">수정</button>
@@ -1465,7 +1478,7 @@ function formForm(id){
     <div class="field"><label>양식명 <span class="req">*</span></label><input id="f_fname" value="${esc(f.name)}" placeholder="예: 기본 양식, 선결제 양식"></div>
     <div class="field"><label>하단 안내 문구</label>
       <textarea id="f_fnote" rows="7" style="resize:vertical;line-height:1.7">${esc(f.note||'')}</textarea>
-      <div style="font-size:12px;color:var(--muted);margin-top:6px">한 줄에 하나씩 입력하세요. 각 줄 앞에 · 기호가 자동으로 붙습니다. 납품기간과 합계금액은 상단에 자동 표시되므로 여기 넣지 않아도 됩니다.</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">한 줄에 하나씩 입력하면 그대로 표시됩니다. 납품기간·합계금액·입금계좌는 견적서에 자동으로 들어가니 여기에는 넣지 않아도 됩니다.</div>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
       <input type="checkbox" id="f_fdefault" ${f.isDefault?'checked':''} style="width:auto"> 기본 양식으로 지정 (주문에서 양식을 고르지 않으면 이 문구가 사용됩니다)
