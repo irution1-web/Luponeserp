@@ -350,7 +350,7 @@ const SB_URL='https://szmenayblndgwjitqtww.supabase.co';
 const SB_KEY='sb_publishable_BLlvvY7I-MKv2pAwYSSFdA_OYKO1Khg';
 const sb = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 
-let users=[], clients=[], suppliers=[], supCategories=[], supProducts=[], categories=[], products=[], orders=[], notifications=[], quoteForms=[];
+let users=[], clients=[], suppliers=[], supCategories=[], supProducts=[], categories=[], products=[], orders=[], notifications=[], quoteForms=[], samples=[];
 
 async function dbIns(t,row){
   const {data,error}=await sb.from(t).insert(row).select().single();
@@ -366,12 +366,12 @@ async function dbDel(t,id){
   if(error){ console.error(t,error); toast('삭제 실패: '+(error.message||'서버 오류')); throw error; }
 }
 async function loadAll(){
-  const tables=['users','clients','suppliers','supCategories','supProducts','categories','products','orders','notifications','quoteForms'];
+  const tables=['users','clients','suppliers','supCategories','supProducts','categories','products','orders','notifications','quoteForms','samples'];
   const res=await Promise.all(tables.map(t=>sb.from(t).select('*').order('id')));
   for(let i=0;i<res.length;i++){
     if(res[i].error){ console.error(tables[i],res[i].error); toast('데이터를 불러오지 못했습니다: '+tables[i]); return false; }
   }
-  [users,clients,suppliers,supCategories,supProducts,categories,products,orders,notifications,quoteForms]=res.map(r=>r.data||[]);
+  [users,clients,suppliers,supCategories,supProducts,categories,products,orders,notifications,quoteForms,samples]=res.map(r=>r.data||[]);
   return true;
 }
 async function refreshData(){
@@ -444,6 +444,7 @@ async function doLogin(){
 /* 로그인 후 화면 진입 */
 function enterApp(){
   const u=currentUser;
+  try{ history.replaceState({page:'dashboard'},'','#dashboard'); }catch(e){}
   document.getElementById('loginView').style.display='none';
   document.getElementById('appView').style.display='block';
   document.getElementById('sideUserName').textContent=u.name;
@@ -520,7 +521,7 @@ function logout(){
   document.getElementById('loginErr').style.display='none';
 }
 const titles={dashboard:'대시보드',orderNew:'주문 등록',orders:'주문 목록',quote:'견적서',clients:'거래처 관리',suppliers:'공급사 관리',products:'상품 관리',forms:'견적서 양식',erp:'매출 ERP',users:'계정 관리'};
-function go(page, param){
+function go(page, param, skipHistory){
   currentPage=page;
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
   document.getElementById('pageTitle').textContent=titles[page];
@@ -529,7 +530,17 @@ function go(page, param){
   const fn=({dashboard:renderDashboard,orderNew:renderOrderNew,orders:renderOrders,quote:()=>renderQuote(param),clients:renderClients,suppliers:renderSuppliers,products:renderProducts,forms:renderForms,erp:renderErp,users:renderUsers})[page];
   try{ const r=fn&&fn(); if(r&&r.catch) r.catch(e=>console.error(page,e)); }catch(e){ console.error(page,e); }
   document.querySelector('.main').scrollTop=0; window.scrollTo(0,0);
+  if(!skipHistory){
+    try{ history.pushState({page,param},'', '#'+page+(param!==undefined&&param!==null?'/'+param:'')); }catch(e){}
+  }
 }
+/* 브라우저 뒤로가기: 앱을 벗어나지 않고 이전 화면으로 */
+window.addEventListener('popstate', e=>{
+  if(!currentUser) return;
+  const st=e.state;
+  if(st&&st.page) go(st.page, st.param, true);
+  else go('dashboard', null, true);
+});
 
 /* ============================================================
    알림 벨
@@ -1331,12 +1342,29 @@ function renderQuote(orderId){
   const list=myOrders().sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
   document.getElementById('content').innerHTML=`
   <div class="toolbar">
-    <div style="color:var(--muted);font-size:13px">주문 건별 견적서 목록입니다. [견적서 보기]를 누르면 문서가 열립니다.</div>
+    <div style="color:var(--muted);font-size:13px">주문 건별 견적서 목록입니다. 거래처 등록 없이 업체명만으로 가견적을 만들려면 [+ 샘플 견적서]를 사용하세요.</div>
+    <button class="btn btn-primary" onclick="sampleForm()">+ 샘플 견적서</button>
   </div>
   <div class="card"><div class="card-b flush">
-  ${list.length ? `<table><thead><tr>
-    <th>견적일자</th><th>견적번호</th><th>거래처</th><th>품목</th><th class="num">합계(VAT포함)</th><th>담당</th><th>상태</th><th style="width:110px"></th>
+  ${(list.length||mySamples().length) ? `<table><thead><tr>
+    <th>견적일자</th><th>견적번호</th><th>거래처</th><th>품목</th><th class="num">합계(VAT포함)</th><th>담당</th><th>구분</th><th style="width:170px"></th>
   </tr></thead><tbody>
+  ${mySamples().sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id).map(sp=>{
+    const total=(sp.items||[]).reduce((t,i)=>t+i.price*i.qty,0); const grand=total+Math.round(total*0.1);
+    return `<tr style="cursor:pointer;background:#FFFDF5" onclick="go('quote','s'+${sp.id})">
+      <td><b>${sp.date}</b></td>
+      <td style="color:var(--muted)">S${sp.date.replace(/-/g,'')}-${String(sp.id).padStart(3,'0')}</td>
+      <td><b>${esc(sp.clientName)}</b></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(sp.items?.[0]?.name||'-')}${(sp.items||[]).length>1?` 외 ${sp.items.length-1}건`:''}</td>
+      <td class="num"><b>${wonS(grand)}</b></td>
+      <td>${esc(userOf(sp.userId)?.name||'-')}</td>
+      <td><span class="status-pill" style="background:var(--amber-soft);color:var(--amber)">샘플</span></td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="mini-btn blue" onclick="event.stopPropagation();go('quote','s'+${sp.id})">견적서 보기</button>
+        <button class="mini-btn red" onclick="event.stopPropagation();delSample(${sp.id})">삭제</button>
+      </td>
+    </tr>`;
+  }).join('')}
   ${list.map(o=>{
     const c=clientOf(o.clientId); const total=orderTotal(o); const grand=total+Math.round(total*0.1);
     const qNo=`Q${o.date.replace(/-/g,'')}-${String(o.id).padStart(3,'0')}`;
@@ -1351,7 +1379,7 @@ function renderQuote(orderId){
       <td style="text-align:right"><button class="mini-btn blue" onclick="event.stopPropagation();go('quote',${o.id})">견적서 보기</button></td>
     </tr>`;
   }).join('')}
-  </tbody></table>` : '<div class="empty">주문을 등록하면 견적서가 자동 생성됩니다.</div>'}
+  </tbody></table>` : '<div class="empty">주문을 등록하면 견적서가 자동 생성됩니다.<br><span style="font-size:12px">거래처 등록 전이라면 [+ 샘플 견적서]로 가견적을 만들 수 있어요.</span></div>'}
   </div></div>`;
 }
 function renderQuoteDetail(orderId){
@@ -1368,11 +1396,14 @@ function renderQuoteDetail(orderId){
 }
 function drawQuote(id){
   const area=document.getElementById('printArea');
-  const o=orders.find(x=>x.id===id);
-  if(!o){ area.innerHTML='<div class="card"><div class="empty">주문을 선택하면 견적서가 생성됩니다.</div></div>'; return; }
-  const c=clientOf(o.clientId);
-  const supply=orderTotal(o), vat=Math.round(supply*0.1), grand=supply+vat;
-  const qNo=`Q${o.date.replace(/-/g,'')}-${String(o.id).padStart(3,'0')}`;
+  const isSample = typeof id==='string' && id.startsWith('s');
+  const o = isSample ? samples.find(x=>x.id===parseInt(id.slice(1))) : orders.find(x=>x.id===id);
+  if(!o){ area.innerHTML='<div class="card"><div class="empty">견적서를 찾을 수 없습니다.</div></div>'; return; }
+  const c = isSample ? {name:o.clientName} : clientOf(o.clientId);
+  const supply=(o.items||[]).reduce((t,i)=>t+i.price*i.qty,0), vat=Math.round(supply*0.1), grand=supply+vat;
+  const qNo = isSample
+    ? `S${o.date.replace(/-/g,'')}-${String(o.id).padStart(3,'0')}`
+    : `Q${o.date.replace(/-/g,'')}-${String(o.id).padStart(3,'0')}`;
   area.innerHTML=`
   <div class="quote-doc">
     <h1>${esc(c?.name||'')} 견적서</h1>
@@ -1382,10 +1413,10 @@ function drawQuote(id){
         <h4>공급받는자</h4>
         <table>
           <tr><td class="lbl">상호명</td><td>${esc(c?.name||'-')}</td></tr>
-          <tr><td class="lbl">사업자번호</td><td>${esc(c?.bizNo||'-')}</td></tr>
+          ${isSample?'':`<tr><td class="lbl">사업자번호</td><td>${esc(c?.bizNo||'-')}</td></tr>
           <tr><td class="lbl">대표자</td><td>${esc(c?.ceo||'-')}</td></tr>
           <tr><td class="lbl">연락처</td><td>${esc(c?.phone||'-')}</td></tr>
-          <tr><td class="lbl">이메일</td><td>${esc(c?.email||'-')}</td></tr>
+          <tr><td class="lbl">이메일</td><td>${esc(c?.email||'-')}</td></tr>`}
         </table>
       </div>
       <div class="supplier-stamp">
@@ -1427,6 +1458,104 @@ function drawQuote(id){
     </div>
     <div class="quote-note">${quoteNoteHtml(o)}</div>
   </div>`;
+}
+
+function mySamples(){ return currentUser.role==='admin' ? samples : samples.filter(x=>x.userId===currentUser.id); }
+let sampleItems=[];
+function sampleForm(keepItems){
+  if(!keepItems) sampleItems=[{name:'',memo:'',price:0,qty:1}];
+  openModal(`
+  <div class="modal-h"><h3>샘플 견적서 만들기</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b">
+    <div class="field"><label>업체명 (공급받는자) <span class="req">*</span></label><input id="sf_client" placeholder="예: 테스트업체"></div>
+    <div class="field-row">
+      <div class="field"><label>납품 시작일</label><input type="date" id="sf_start" value="${dstr(0)}"></div>
+      <div class="field"><label>납품 종료일</label><input type="date" id="sf_due" value="${dstr(6)}"></div>
+    </div>
+    <div class="field"><label>견적서 양식</label>
+      <select id="sf_form">
+        <option value="">${quoteForms.find(f=>f.isDefault)?'기본 양식 ('+esc(quoteForms.find(f=>f.isDefault).name)+')':'기본 문구'}</option>
+        ${quoteForms.map(f=>`<option value="${f.id}">${esc(f.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="sec-head" style="margin-top:6px">
+      <span class="t sell">품목</span>
+      <button class="sec-add sell" onclick="addSampleItem()">＋ 품목 추가</button>
+    </div>
+    <div id="sampleItems"></div>
+    <div class="order-total" style="margin-top:10px"><span class="grand">합계(VAT 포함) <b id="sfTotal">0원</b></span></div>
+  </div>
+  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveSample()">견적서 생성</button></div>`, true);
+  renderSampleItems();
+}
+function renderSampleItems(){
+  document.getElementById('sampleItems').innerHTML=sampleItems.map((it,i)=>`
+  <div style="display:grid;grid-template-columns:1.5fr 1.1fr .9fr .5fr 32px;gap:6px;align-items:center;margin-bottom:6px">
+    <div style="display:flex;gap:4px">
+      <input placeholder="품목명" value="${esc(it.name)}" oninput="sampleItems[${i}].name=this.value" style="min-width:0">
+      <button class="mini-btn blue" onclick="pickSampleProduct(${i})" title="등록 상품에서 선택">선택</button>
+    </div>
+    <input placeholder="비고" value="${esc(it.memo)}" oninput="sampleItems[${i}].memo=this.value">
+    <input type="number" min="0" value="${it.price}" style="text-align:right" title="단가" oninput="sampleItems[${i}].price=parseInt(this.value)||0;sampleTotal()">
+    <input type="number" min="1" value="${it.qty}" style="text-align:right" title="수량" oninput="sampleItems[${i}].qty=parseInt(this.value)||0;sampleTotal()">
+    <button class="rm" onclick="rmSampleItem(${i})">✕</button>
+  </div>`).join('');
+  sampleTotal();
+}
+function sampleTotal(){
+  const t=sampleItems.reduce((s,i)=>s+i.price*i.qty,0);
+  document.getElementById('sfTotal').textContent=won(t+Math.round(t*0.1));
+}
+function addSampleItem(){ sampleItems.push({name:'',memo:'',price:0,qty:1}); renderSampleItems(); }
+function rmSampleItem(i){ if(sampleItems.length===1){ toast('최소 1개 품목이 필요합니다'); return; } sampleItems.splice(i,1); renderSampleItems(); }
+function pickSampleProduct(i){
+  const saved={client:document.getElementById('sf_client').value, start:document.getElementById('sf_start').value, due:document.getElementById('sf_due').value, form:document.getElementById('sf_form').value};
+  openModal(`
+  <div class="modal-h"><h3>등록 상품 선택</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b" style="max-height:60vh;overflow:auto">
+    ${categories.map(cat=>{
+      const ps=products.filter(p=>p.catId===cat.id);
+      return `<div class="acc open" id="smp-${cat.id}">
+        <div class="acc-h" onclick="document.getElementById('smp-${cat.id}').classList.toggle('open')">
+          <span>${esc(cat.name)}<span class="acc-count">${ps.length}개</span></span><span class="arrow">▶</span>
+        </div>
+        <div class="acc-body">
+          ${ps.length?ps.map(p=>`<div class="acc-item pickable" onclick="applySampleProduct(${i},${p.id},${JSON.stringify(JSON.stringify(saved)).replace(/"/g,'&quot;')})">
+            <span class="p-name">${esc(p.name)}</span><span class="p-price">${won(p.price)}</span>
+          </div>`).join(''):'<div class="acc-item" style="color:var(--muted)">상품 없음</div>'}
+        </div></div>`;
+    }).join('') || '<div class="empty">등록된 상품이 없습니다. 품목명을 직접 입력하세요.</div>'}
+  </div>`, true);
+}
+function applySampleProduct(i, pid, savedJson){
+  const p=products.find(x=>x.id===pid);
+  sampleItems[i]={...sampleItems[i], name:p.name, price:p.price};
+  const saved=JSON.parse(savedJson);
+  sampleForm(true);
+  document.getElementById('sf_client').value=saved.client||'';
+  if(saved.start) document.getElementById('sf_start').value=saved.start;
+  if(saved.due) document.getElementById('sf_due').value=saved.due;
+  if(saved.form) document.getElementById('sf_form').value=saved.form;
+}
+async function saveSample(){
+  const clientName=document.getElementById('sf_client').value.trim();
+  if(!clientName){ toast('업체명을 입력하세요'); return; }
+  const items=sampleItems.filter(i=>i.name.trim()&&i.qty>0);
+  if(!items.length){ toast('품목을 1개 이상 입력하세요'); return; }
+  const row={clientName, userId:currentUser.id, date:dstr(0),
+    startDate:document.getElementById('sf_start').value||dstr(0),
+    dueDate:document.getElementById('sf_due').value||dstr(6),
+    formId:parseInt(document.getElementById('sf_form').value)||null,
+    items:items.map(i=>({name:i.name.trim(),memo:i.memo,price:i.price,qty:i.qty}))};
+  let saved;
+  try{ saved=await dbIns('samples',row); samples.push(saved); }catch(e){ return; }
+  closeModal(); toast('샘플 견적서를 생성했습니다');
+  go('quote','s'+saved.id);
+}
+async function delSample(id){
+  if(!confirm('이 샘플 견적서를 삭제할까요?')) return;
+  try{ await dbDel('samples',id); }catch(e){ return; }
+  samples=samples.filter(x=>x.id!==id); renderQuote(); toast('삭제했습니다');
 }
 
 const DEFAULT_NOTE='결제조건: 납품 후 세금계산서 발행, 익월 말 현금 결제\n본 견적은 발행일로부터 30일간 유효하며, 이후 단가는 변동될 수 있습니다.\n결제 완료 후 담당자에게 말씀 주시면 당일 오후에 계산서가 발행됩니다.';
