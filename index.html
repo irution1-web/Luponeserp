@@ -214,7 +214,7 @@ th.num{text-align:right}
 
 /* 견적서 문서 */
 .quote-doc{background:#fff;border:1px solid var(--line);max-width:760px;margin:0 auto;padding:48px 52px;box-shadow:var(--shadow);position:relative}
-.quote-doc h1{text-align:center;font-size:30px;letter-spacing:.5em;text-indent:.5em;font-weight:800;margin-bottom:8px;color:var(--ink)}
+.quote-doc h1{text-align:center;font-size:28px;letter-spacing:.06em;font-weight:800;margin-bottom:8px;color:var(--ink);white-space:nowrap}
 .quote-underline{border-bottom:3px double var(--ink);margin-bottom:24px;padding-bottom:14px;text-align:center;color:var(--muted);font-size:13px}
 .quote-meta{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:22px;font-size:13px}
 .quote-meta table td{padding:6px 8px;border:1px solid var(--line);font-size:13px;white-space:nowrap}
@@ -228,6 +228,11 @@ th.num{text-align:right}
 .quote-items tfoot td{font-weight:800;background:#FBFBF7}
 .quote-note{margin-top:20px;font-size:12px;color:var(--muted);line-height:1.8}
 .quote-total-line{margin:18px 0;padding:12px 16px;background:#F4F5F1;border:1px solid var(--line);font-weight:800;font-size:15px;display:flex;justify-content:space-between;white-space:nowrap;gap:12px}
+.quote-headline{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:18px 0}
+.quote-box{padding:12px 16px;background:#F4F5F1;border:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;white-space:nowrap;gap:10px}
+.quote-box .lb{font-weight:800;font-size:14px;color:#444}
+.quote-box .vl{font-weight:800;font-size:16px;color:var(--ink)}
+.quote-box.total .vl{font-size:18px}
 .quote-note{white-space:nowrap}
 
 /* 차트 */
@@ -287,6 +292,7 @@ th.num{text-align:right}
       <button data-page="clients" onclick="go('clients')"><span class="ico">◈</span><span class="txt">거래처 관리</span></button>
       <button data-page="suppliers" onclick="go('suppliers')"><span class="ico">⬡</span><span class="txt">공급사 관리</span></button>
       <button data-page="products" onclick="go('products')"><span class="ico">▣</span><span class="txt">상품 관리</span></button>
+      <button data-page="forms" onclick="go('forms')" id="navForms"><span class="ico">▥</span><span class="txt">견적서 양식</span></button>
       <div class="nav-label">경영</div>
       <button data-page="erp" onclick="go('erp')"><span class="ico">↗</span><span class="txt">매출 ERP</span></button>
       <button data-page="users" onclick="go('users')" id="navUsers"><span class="ico">✦</span><span class="txt">계정 관리</span></button>
@@ -338,7 +344,7 @@ const SB_URL='https://szmenayblndgwjitqtww.supabase.co';
 const SB_KEY='sb_publishable_BLlvvY7I-MKv2pAwYSSFdA_OYKO1Khg';
 const sb = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 
-let users=[], clients=[], suppliers=[], supProducts=[], categories=[], products=[], orders=[], notifications=[];
+let users=[], clients=[], suppliers=[], supCategories=[], supProducts=[], categories=[], products=[], orders=[], notifications=[], quoteForms=[];
 
 async function dbIns(t,row){
   const {data,error}=await sb.from(t).insert(row).select().single();
@@ -354,12 +360,12 @@ async function dbDel(t,id){
   if(error){ console.error(t,error); toast('삭제 실패: '+(error.message||'서버 오류')); throw error; }
 }
 async function loadAll(){
-  const tables=['users','clients','suppliers','supProducts','categories','products','orders','notifications'];
+  const tables=['users','clients','suppliers','supCategories','supProducts','categories','products','orders','notifications','quoteForms'];
   const res=await Promise.all(tables.map(t=>sb.from(t).select('*').order('id')));
   for(let i=0;i<res.length;i++){
     if(res[i].error){ console.error(tables[i],res[i].error); toast('데이터를 불러오지 못했습니다: '+tables[i]); return false; }
   }
-  [users,clients,suppliers,supProducts,categories,products,orders,notifications]=res.map(r=>r.data||[]);
+  [users,clients,suppliers,supCategories,supProducts,categories,products,orders,notifications,quoteForms]=res.map(r=>r.data||[]);
   return true;
 }
 async function refreshData(){
@@ -428,6 +434,7 @@ async function doLogin(){
   document.getElementById('sideUserName').textContent=u.name;
   document.getElementById('sideUserRole').textContent=u.role==='admin'?'슈퍼어드민':'팀원';
   document.getElementById('navUsers').style.display=u.role==='admin'?'flex':'none';
+  document.getElementById('navForms').style.display=u.role==='admin'?'flex':'none';
   go('dashboard');
   showFeedbackPopup();
 }
@@ -480,14 +487,14 @@ function logout(){
   document.getElementById('loginId').value=''; document.getElementById('loginPw').value='';
   document.getElementById('loginErr').style.display='none';
 }
-const titles={dashboard:'대시보드',orderNew:'주문 등록',orders:'주문 목록',quote:'견적서',clients:'거래처 관리',suppliers:'공급사 관리',products:'상품 관리',erp:'매출 ERP',users:'계정 관리'};
+const titles={dashboard:'대시보드',orderNew:'주문 등록',orders:'주문 목록',quote:'견적서',clients:'거래처 관리',suppliers:'공급사 관리',products:'상품 관리',forms:'견적서 양식',erp:'매출 ERP',users:'계정 관리'};
 function go(page, param){
   currentPage=page;
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
   document.getElementById('pageTitle').textContent=titles[page];
   document.getElementById('bellPanel').classList.remove('open');
   renderBell();
-  ({dashboard:renderDashboard,orderNew:renderOrderNew,orders:renderOrders,quote:()=>renderQuote(param),clients:renderClients,suppliers:renderSuppliers,products:renderProducts,erp:renderErp,users:renderUsers})[page]();
+  ({dashboard:renderDashboard,orderNew:renderOrderNew,orders:renderOrders,quote:()=>renderQuote(param),clients:renderClients,suppliers:renderSuppliers,products:renderProducts,forms:renderForms,erp:renderErp,users:renderUsers})[page]();
   document.querySelector('.main').scrollTop=0; window.scrollTo(0,0);
 }
 
@@ -687,7 +694,6 @@ async function saveClient(id){
 }
 async function delClient(id){
   if(orders.some(o=>o.clientId===id)){ toast('주문 이력이 있는 거래처는 삭제할 수 없습니다'); return; }
-  if(products.some(p=>p.clientId===id)){ toast('이 거래처가 등록된 상품이 있어 삭제할 수 없습니다'); return; }
   if(!confirm('이 거래처를 삭제할까요?')) return;
   try{ await dbDel('clients',id); }catch(e){ return; }
   clients=clients.filter(c=>c.id!==id); renderClients(); toast('삭제했습니다');
@@ -710,29 +716,73 @@ function renderSupAcc(){
   const isAdmin=currentUser.role==='admin';
   const wrap=document.getElementById('supAcc');
   wrap.innerHTML = suppliers.length ? suppliers.map(sup=>{
+    const cats=supCategories.filter(c=>c.supId===sup.id);
     const ps=supProducts.filter(p=>p.supId===sup.id);
     return `<div class="acc" id="sup-${sup.id}">
       <div class="acc-h" onclick="document.getElementById('sup-${sup.id}').classList.toggle('open')">
-        <span>${esc(sup.name)}<span class="acc-count">${ps.length}개 서비스 · ${esc(sup.phone||'')}</span></span>
+        <span>${esc(sup.name)}<span class="acc-count">${cats.length}개 카테고리 · ${ps.length}개 서비스</span></span>
         <span style="display:flex;align-items:center;gap:6px">
-          ${isAdmin?`<button class="mini-btn blue" onclick="event.stopPropagation();supProdForm(${sup.id})">+ 서비스 상품</button>
+          ${isAdmin?`<button class="mini-btn blue" onclick="event.stopPropagation();supCatForm(${sup.id})">+ 카테고리</button>
           <button class="mini-btn" onclick="event.stopPropagation();supForm(${sup.id})">수정</button>
           <button class="mini-btn red" onclick="event.stopPropagation();delSup(${sup.id})">삭제</button>`:''}
           <span class="arrow">▶</span>
         </span>
       </div>
-      <div class="acc-body">
-        ${ps.length ? ps.map(p=>`<div class="acc-item">
-          <span class="p-name">${esc(p.name)}</span>
-          <span style="display:flex;align-items:center;gap:10px">
-            <span class="p-price">원가 ${won(p.cost)}</span>
-            ${isAdmin?`<button class="mini-btn" onclick="supProdForm(${p.supId},${p.id})">수정</button>
-            <button class="mini-btn red" onclick="delSupProd(${p.id})">삭제</button>`:''}
-          </span></div>`).join('')
-        : '<div class="acc-item" style="color:var(--muted)">등록된 서비스 상품이 없습니다</div>'}
+      <div class="acc-body" style="padding:10px 12px;background:#FBFBF9">
+        ${cats.length ? cats.map(cat=>{
+          const cps=supProducts.filter(p=>p.supCatId===cat.id);
+          return `<div class="acc" id="supcat-${cat.id}" style="margin-bottom:8px">
+            <div class="acc-h" onclick="event.stopPropagation();document.getElementById('supcat-${cat.id}').classList.toggle('open')" style="padding:11px 14px">
+              <span>${esc(cat.name)}<span class="acc-count">${cps.length}개 상품</span></span>
+              <span style="display:flex;align-items:center;gap:6px">
+                ${isAdmin?`<button class="mini-btn blue" onclick="event.stopPropagation();supProdForm(${sup.id},${cat.id})">+ 상품</button>
+                <button class="mini-btn" onclick="event.stopPropagation();supCatForm(${sup.id},${cat.id})">수정</button>
+                <button class="mini-btn red" onclick="event.stopPropagation();delSupCat(${cat.id})">삭제</button>`:''}
+                <span class="arrow">▶</span>
+              </span>
+            </div>
+            <div class="acc-body">
+              ${cps.length ? cps.map(p=>`<div class="acc-item">
+                <span class="p-name">${esc(p.name)}</span>
+                <span style="display:flex;align-items:center;gap:10px">
+                  <span class="p-price">원가 ${won(p.cost)}</span>
+                  ${isAdmin?`<button class="mini-btn" onclick="event.stopPropagation();supProdForm(${sup.id},${cat.id},${p.id})">수정</button>
+                  <button class="mini-btn red" onclick="event.stopPropagation();delSupProd(${p.id})">삭제</button>`:''}
+                </span></div>`).join('')
+              : '<div class="acc-item" style="color:var(--muted)">등록된 상품이 없습니다</div>'}
+            </div>
+          </div>`;
+        }).join('') : `<div class="acc-item" style="color:var(--muted);background:#fff;border:1px solid var(--line);border-radius:8px">${isAdmin?'[+ 카테고리] 버튼으로 카테고리를 먼저 추가하세요':'등록된 카테고리가 없습니다'}</div>`}
       </div>
     </div>`;
   }).join('') : `<div class="card"><div class="empty">${isAdmin?'공급사를 먼저 등록하세요.':'등록된 공급사가 없습니다.'}</div></div>`;
+}
+/* 공급사 카테고리 */
+function supCatForm(supId, catId){
+  if(currentUser.role!=='admin'){ toast('카테고리 등록·수정은 슈퍼어드민만 가능합니다'); return; }
+  const c=catId?supCategories.find(x=>x.id===catId):{name:''};
+  openModal(`
+  <div class="modal-h"><h3>${catId?'카테고리 수정':'카테고리 추가'} · ${esc(suppliers.find(s=>s.id===supId).name)}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b"><div class="field"><label>카테고리명 <span class="req">*</span></label><input id="f_scatname" value="${esc(c.name)}" placeholder="예: 플레이스"></div></div>
+  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveSupCat(${supId},${catId||0})">저장</button></div>`);
+  setTimeout(()=>document.getElementById('f_scatname').focus(),50);
+}
+async function saveSupCat(supId, catId){
+  const name=document.getElementById('f_scatname').value.trim();
+  if(!name){ toast('카테고리명을 입력하세요'); return; }
+  try{
+    if(catId){ await dbUpd('supCategories',catId,{name}); Object.assign(supCategories.find(c=>c.id===catId),{name}); toast('카테고리를 수정했습니다'); }
+    else{ const row=await dbIns('supCategories',{supId,name}); supCategories.push(row); toast('카테고리를 추가했습니다'); }
+  }catch(e){ return; }
+  closeModal(); renderSuppliers();
+  document.getElementById('sup-'+supId)?.classList.add('open');
+}
+async function delSupCat(catId){
+  if(currentUser.role!=='admin'){ toast('삭제는 슈퍼어드민만 가능합니다'); return; }
+  if(supProducts.some(p=>p.supCatId===catId)){ toast('상품이 있는 카테고리는 삭제할 수 없습니다'); return; }
+  if(!confirm('이 카테고리를 삭제할까요?')) return;
+  try{ await dbDel('supCategories',catId); }catch(e){ return; }
+  supCategories=supCategories.filter(c=>c.id!==catId); renderSuppliers(); toast('삭제했습니다');
 }
 function supForm(id){
   if(currentUser.role!=='admin'){ toast('공급사 등록·수정은 슈퍼어드민만 가능합니다'); return; }
@@ -762,34 +812,38 @@ async function saveSup(id){
 async function delSup(id){
   if(currentUser.role!=='admin'){ toast('공급사 삭제는 슈퍼어드민만 가능합니다'); return; }
   if(supProducts.some(p=>p.supId===id)){ toast('서비스 상품이 있는 공급사는 삭제할 수 없습니다'); return; }
+  if(supCategories.some(c=>c.supId===id)){ toast('카테고리가 있는 공급사는 삭제할 수 없습니다'); return; }
   if(!confirm('이 공급사를 삭제할까요?')) return;
   try{ await dbDel('suppliers',id); }catch(e){ return; }
   suppliers=suppliers.filter(s=>s.id!==id); renderSuppliers(); toast('삭제했습니다');
 }
-function supProdForm(supId, pid){
+function supProdForm(supId, supCatId, pid){
   if(currentUser.role!=='admin'){ toast('서비스 상품 등록·수정은 슈퍼어드민만 가능합니다'); return; }
   const p=pid?supProducts.find(x=>x.id===pid):{name:'',cost:''};
+  const cat=supCategories.find(c=>c.id===supCatId);
   openModal(`
-  <div class="modal-h"><h3>${pid?'서비스 상품 수정':'서비스 상품 등록'} · ${esc(suppliers.find(s=>s.id===supId).name)}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-h"><h3>${pid?'서비스 상품 수정':'서비스 상품 등록'} · ${esc(cat?.name||'')}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
-    <div class="field"><label>서비스 상품명 <span class="req">*</span></label><input id="f_spname" value="${esc(p.name)}"></div>
+    <div class="field"><label>서비스 상품명 <span class="req">*</span></label><input id="f_spname" value="${esc(p.name)}" placeholder="예: DAS"></div>
     <div class="field"><label>원가 (매입가, 원) <span class="req">*</span></label><input id="f_spcost" type="number" min="0" value="${p.cost}"></div>
   </div>
-  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveSupProd(${supId},${pid||0})">저장</button></div>`);
+  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveSupProd(${supId},${supCatId},${pid||0})">저장</button></div>`);
 }
-async function saveSupProd(supId,pid){
+async function saveSupProd(supId,supCatId,pid){
   const name=document.getElementById('f_spname').value.trim();
   const cost=parseInt(document.getElementById('f_spcost').value)||0;
   if(!name||cost<=0){ toast('상품명과 원가를 입력하세요'); return; }
   try{
     if(pid){ await dbUpd('supProducts',pid,{name,cost}); Object.assign(supProducts.find(p=>p.id===pid),{name,cost}); toast('서비스 상품을 수정했습니다'); }
-    else{ const row=await dbIns('supProducts',{supId,name,cost}); supProducts.push(row); toast('서비스 상품을 등록했습니다'); }
+    else{ const row=await dbIns('supProducts',{supId,supCatId,name,cost}); supProducts.push(row); toast('서비스 상품을 등록했습니다'); }
   }catch(e){ return; }
   closeModal(); renderSuppliers();
   document.getElementById('sup-'+supId)?.classList.add('open');
+  document.getElementById('supcat-'+supCatId)?.classList.add('open');
 }
 async function delSupProd(id){
   if(currentUser.role!=='admin'){ toast('삭제는 슈퍼어드민만 가능합니다'); return; }
+  if(products.some(p=>p.spId===id)){ toast('이 서비스 상품과 연결된 판매 상품이 있어 삭제할 수 없습니다'); return; }
   if(!confirm('이 서비스 상품을 삭제할까요?')) return;
   try{ await dbDel('supProducts',id); }catch(e){ return; }
   supProducts=supProducts.filter(p=>p.id!==id); renderSuppliers(); toast('삭제했습니다');
@@ -808,9 +862,13 @@ function renderProducts(){
   <div id="prodAcc"></div>`;
   renderProdAcc();
 }
-function prodClientLabel(p){
-  if(p.clientId==null) return '<span style="color:var(--muted)">자체상품</span>';
-  return esc(clientOf(p.clientId)?.name||'-');
+function prodSupLabel(p){
+  if(p.spId==null) return '<span style="color:var(--muted)">자체상품</span>';
+  const sp=supProducts.find(x=>x.id===p.spId);
+  if(!sp) return '<span style="color:var(--muted)">공급사 미지정</span>';
+  const sup=suppliers.find(x=>x.id===sp.supId);
+  const cat=supCategories.find(c=>c.id===sp.supCatId);
+  return `<span style="color:var(--amber)">${esc(sup?.name||'')}${cat?' · '+esc(cat.name):''} · ${esc(sp.name)} (원가 ${wonS(sp.cost)}원)</span>`;
 }
 function renderProdAcc(){
   const isAdmin = currentUser.role==='admin';
@@ -828,7 +886,7 @@ function renderProdAcc(){
       </div>
       <div class="acc-body">
         ${ps.length ? ps.map(p=>`<div class="acc-item">
-          <span><span class="p-name">${esc(p.name)}</span><span class="acc-count">· ${prodClientLabel(p)}</span></span>
+          <span><span class="p-name">${esc(p.name)}</span><span class="acc-count">· ${prodSupLabel(p)}</span></span>
           <span style="display:flex;align-items:center;gap:10px">
             <span class="p-price">${won(p.price)}</span>
             ${isAdmin?`<button class="mini-btn" onclick="prodForm(${p.catId},${p.id})">수정</button>
@@ -862,17 +920,27 @@ async function delCat(id){
 }
 function prodForm(catId, pid){
   if(currentUser.role!=='admin'){ toast('상품 등록·수정은 슈퍼어드민만 가능합니다'); return; }
-  const p=pid?products.find(x=>x.id===pid):{name:'',price:'',clientId:null};
+  const p=pid?products.find(x=>x.id===pid):{name:'',price:'',spId:null};
   openModal(`
   <div class="modal-h"><h3>${pid?'상품 수정':'상품 등록'} · ${esc(categories.find(c=>c.id===catId).name)}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
     <div class="field"><label>상품명 <span class="req">*</span></label><input id="f_pname" value="${esc(p.name)}"></div>
     <div class="field"><label>기본 판매가 (원) <span class="req">*</span></label><input id="f_pprice" type="number" min="0" value="${p.price}"></div>
-    <div class="field"><label>거래처</label>
-      <select id="f_pclient">
-        <option value="">거래처 없음 (자체상품)</option>
-        ${clients.map(c=>`<option value="${c.id}" ${p.clientId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}
+    <div class="field"><label>매입 공급사 상품 (원가 자동 연결)</label>
+      <select id="f_pspid">
+        <option value="">공급사 없음 (자체상품)</option>
+        ${suppliers.map(sup=>{
+          const cats=supCategories.filter(c=>c.supId===sup.id);
+          return cats.map(cat=>{
+            const cps=supProducts.filter(x=>x.supCatId===cat.id);
+            if(!cps.length) return '';
+            return `<optgroup label="${esc(sup.name)} · ${esc(cat.name)}">
+              ${cps.map(x=>`<option value="${x.id}" ${p.spId===x.id?'selected':''}>${esc(x.name)} — 원가 ${wonS(x.cost)}원</option>`).join('')}
+            </optgroup>`;
+          }).join('');
+        }).join('')}
       </select>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">연결하면 주문 등록 시 이 상품을 고를 때 매입(원가)이 자동으로 채워집니다.</div>
     </div>
   </div>
   <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveProd(${catId},${pid||0})">저장</button></div>`);
@@ -881,12 +949,12 @@ async function saveProd(catId,pid){
   if(currentUser.role!=='admin'){ toast('상품 등록·수정은 슈퍼어드민만 가능합니다'); return; }
   const name=document.getElementById('f_pname').value.trim();
   const price=parseInt(document.getElementById('f_pprice').value)||0;
-  const cv=document.getElementById('f_pclient').value;
-  const clientId=cv?parseInt(cv):null;
+  const sv=document.getElementById('f_pspid').value;
+  const spId=sv?parseInt(sv):null;
   if(!name||price<=0){ toast('상품명과 판매가를 입력하세요'); return; }
   try{
-    if(pid){ await dbUpd('products',pid,{name,price,clientId}); Object.assign(products.find(p=>p.id===pid),{name,price,clientId}); toast('상품을 수정했습니다'); }
-    else{ const row=await dbIns('products',{catId,name,price,clientId}); products.push(row); toast('상품을 등록했습니다'); }
+    if(pid){ await dbUpd('products',pid,{name,price,spId}); Object.assign(products.find(p=>p.id===pid),{name,price,spId}); toast('상품을 수정했습니다'); }
+    else{ const row=await dbIns('products',{catId,name,price,spId}); products.push(row); toast('상품을 등록했습니다'); }
   }catch(e){ return; }
   closeModal(); renderProducts();
   document.getElementById('acc-'+catId)?.classList.add('open');
@@ -908,15 +976,30 @@ function renderOrderNew(){
   <div class="card" style="max-width:1040px">
     <div class="card-h"><h3>새 주문 등록</h3></div>
     <div class="card-b">
-      <div class="field-row" style="grid-template-columns:1.6fr 1fr .7fr 1fr;margin-bottom:8px">
+      <div class="field-row" style="grid-template-columns:1.6fr 1fr;margin-bottom:8px">
         <div class="field"><label>거래처 <span class="req">*</span></label>
-          <select id="o_client"><option value="">거래처 선택</option>${myClients().map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+          <select id="o_client" onchange="syncOrderOwner()"><option value="">거래처 선택</option>${myClients().map(c=>`<option value="${c.id}">${esc(c.name)}${c.userId&&currentUser.role==='admin'?' ('+esc(userOf(c.userId)?.name||'')+')':''}</option>`).join('')}</select>
         </div>
+        <div class="field"><label>담당자 <span class="req">*</span></label>
+          <select id="o_owner" ${currentUser.role!=='admin'?'disabled':''}>
+            ${currentUser.role==='admin'
+              ? users.map(u=>`<option value="${u.id}" ${u.id===currentUser.id?'selected':''}>${esc(u.name)}</option>`).join('')
+              : `<option value="${currentUser.id}">${esc(currentUser.name)}</option>`}
+          </select>
+        </div>
+      </div>
+      <div class="field-row" style="grid-template-columns:1fr .7fr 1fr 1.2fr;margin-bottom:8px">
         <div class="field"><label>시작일 <span class="req">*</span></label><input type="date" id="o_start" value="${dstr(0)}" onchange="calcDue()"></div>
         <div class="field"><label>작업 일수</label><input type="number" id="o_days" min="1" value="7" style="text-align:right" oninput="calcDue()"></div>
         <div class="field"><label>마감일 <span class="req">*</span></label><input type="date" id="o_due" value="${dstr(6)}" onchange="calcDays()"></div>
+        <div class="field"><label>견적서 양식</label>
+          <select id="o_form">
+            <option value="">${quoteForms.find(f=>f.isDefault)?'기본 양식 ('+esc(quoteForms.find(f=>f.isDefault).name)+')':'기본 문구'}</option>
+            ${quoteForms.map(f=>`<option value="${f.id}">${esc(f.name)}</option>`).join('')}
+          </select>
+        </div>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin:-4px 0 6px">💡 작업 일수를 입력하면 시작일을 포함해 마감일이 자동 계산됩니다. 판매 상품과 공급사 주문(매입)은 각각 따로 추가하세요.</div>
+      <div style="font-size:12px;color:var(--muted);margin:-4px 0 6px">💡 담당자의 실적·정산으로 집계됩니다. 거래처를 선택하면 그 거래처의 담당자가 자동으로 지정돼요.</div>
 
       <div class="sec-head">
         <span class="t sell">🛒 판매 상품 <span class="req">*</span></span>
@@ -946,6 +1029,13 @@ function renderOrderNew(){
   renderSellLines(); renderBuyLines();
 }
 /* 작업 일수 ↔ 마감일 자동 계산 (시작일 포함) */
+/* 거래처 선택 시 그 거래처 담당자를 주문 담당자로 자동 지정 (어드민만 변경 가능) */
+function syncOrderOwner(){
+  if(currentUser.role!=='admin') return;
+  const cid=parseInt(document.getElementById('o_client').value)||0;
+  const c=clientOf(cid);
+  if(c&&c.userId&&users.some(u=>u.id===c.userId)) document.getElementById('o_owner').value=c.userId;
+}
 function calcDue(){
   const start=document.getElementById('o_start').value;
   const days=parseInt(document.getElementById('o_days').value);
@@ -1033,7 +1123,7 @@ function openPicker(lineIdx){
         </div>
         <div class="acc-body">
           ${ps.length ? ps.map(p=>`<div class="acc-item pickable" onclick="pickProduct(${lineIdx},${p.id})">
-            <span><span class="p-name">${esc(p.name)}</span><span class="acc-count">· ${prodClientLabel(p)}</span></span><span class="p-price">${won(p.price)}</span>
+            <span><span class="p-name">${esc(p.name)}</span><span class="acc-count">· ${prodSupLabel(p)}</span></span><span class="p-price">${won(p.price)}</span>
           </div>`).join('') : '<div class="acc-item" style="color:var(--muted)">상품 없음</div>'}
         </div></div>`;
     }).join('') || '<div class="empty">상품 관리에서 카테고리와 상품을 먼저 등록하세요.</div>'}
@@ -1043,6 +1133,22 @@ function pickProduct(lineIdx, pid){
   const p=products.find(x=>x.id===pid);
   draftSell[lineIdx]={...draftSell[lineIdx], productId:p.id, name:p.name, price:p.price};
   closeModal(); renderSellLines();
+  autoLinkBuy(p, draftSell[lineIdx].qty||1);
+}
+/* 판매 상품에 연결된 공급사 상품이 있으면 매입 줄 자동 추가 */
+function autoLinkBuy(p, qty){
+  if(!p.spId) return;
+  const sp=supProducts.find(x=>x.id===p.spId);
+  if(!sp) return;
+  if(draftBuy.some(l=>l.spId===sp.id)) return; // 이미 있으면 중복 추가 안 함
+  const sup=suppliers.find(x=>x.id===sp.supId);
+  const cat=supCategories.find(c=>c.id===sp.supCatId);
+  const label=`${sup?.name||''}${cat?' · '+cat.name:''} · ${sp.name}`;
+  const empty=draftBuy.findIndex(l=>!l.spId&&!l.cost);
+  const row={spId:sp.id, spName:label, memo:'', cost:sp.cost, qty:qty||1};
+  if(empty>=0) draftBuy[empty]=row; else draftBuy.push(row);
+  renderBuyLines();
+  toast('연결된 공급사 매입이 자동 입력되었습니다');
 }
 
 /* 공급사 서비스 상품 선택 모달 (매입) */
@@ -1054,15 +1160,24 @@ function openSupPicker(lineIdx){
       <span class="p-name" style="color:var(--muted)">직접 매입 (공급사 없음 · 원가 직접 입력)</span>
     </div>
     ${suppliers.map(sup=>{
-      const ps=supProducts.filter(p=>p.supId===sup.id);
+      const cats=supCategories.filter(c=>c.supId===sup.id);
       return `<div class="acc open" id="spk-${sup.id}">
         <div class="acc-h" onclick="document.getElementById('spk-${sup.id}').classList.toggle('open')">
-          <span>${esc(sup.name)}<span class="acc-count">${ps.length}개 서비스</span></span><span class="arrow">▶</span>
+          <span>${esc(sup.name)}<span class="acc-count">${supProducts.filter(p=>p.supId===sup.id).length}개 서비스</span></span><span class="arrow">▶</span>
         </div>
-        <div class="acc-body">
-          ${ps.length ? ps.map(p=>`<div class="acc-item pickable" onclick="pickSupProduct(${lineIdx},${p.id})">
-            <span class="p-name">${esc(p.name)}</span><span class="p-price">원가 ${won(p.cost)}</span>
-          </div>`).join('') : '<div class="acc-item" style="color:var(--muted)">서비스 상품 없음</div>'}
+        <div class="acc-body" style="padding:8px 10px;background:#FBFBF9">
+          ${cats.length ? cats.map(cat=>{
+            const cps=supProducts.filter(p=>p.supCatId===cat.id);
+            return `<div class="acc open" id="spkc-${cat.id}" style="margin-bottom:6px">
+              <div class="acc-h" onclick="event.stopPropagation();document.getElementById('spkc-${cat.id}').classList.toggle('open')" style="padding:10px 13px">
+                <span>${esc(cat.name)}<span class="acc-count">${cps.length}개</span></span><span class="arrow">▶</span>
+              </div>
+              <div class="acc-body">
+                ${cps.length ? cps.map(p=>`<div class="acc-item pickable" onclick="pickSupProduct(${lineIdx},${p.id})">
+                  <span class="p-name">${esc(p.name)}</span><span class="p-price">원가 ${won(p.cost)}</span>
+                </div>`).join('') : '<div class="acc-item" style="color:var(--muted)">상품 없음</div>'}
+              </div></div>`;
+          }).join('') : '<div class="acc-item" style="color:var(--muted);background:#fff;border-radius:8px">카테고리 없음</div>'}
         </div></div>`;
     }).join('') || '<div class="empty">공급사 관리에서 공급사와 서비스 상품을 먼저 등록하세요.</div>'}
   </div>`, true);
@@ -1072,7 +1187,8 @@ function pickSupProduct(lineIdx, spid){
   else{
     const p=supProducts.find(x=>x.id===spid);
     const sup=suppliers.find(s=>s.id===p.supId);
-    draftBuy[lineIdx]={...draftBuy[lineIdx], spId:p.id, spName:`${sup.name} · ${p.name}`, cost:p.cost};
+    const cat=supCategories.find(c=>c.id===p.supCatId);
+    draftBuy[lineIdx]={...draftBuy[lineIdx], spId:p.id, spName:`${sup?.name||''}${cat?' · '+cat.name:''} · ${p.name}`, cost:p.cost};
   }
   closeModal(); renderBuyLines();
 }
@@ -1086,7 +1202,11 @@ async function saveOrder(){
   const items=draftSell.filter(l=>l.productId&&l.qty>0);
   if(!items.length){ toast('판매 상품을 1개 이상 추가하세요'); return; }
   const buyItems=draftBuy.filter(l=>(l.spId||l.cost>0)&&l.qty>0).map(l=>({spId:l.spId==='direct'?null:l.spId,spName:l.spName||'직접 매입',memo:l.memo,cost:l.cost||0,qty:l.qty}));
-  const o={clientId, userId:currentUser.id, date:dstr(0), startDate, dueDate, status:'진행중',
+  const userId = currentUser.role==='admin'
+    ? (parseInt(document.getElementById('o_owner').value)||currentUser.id)
+    : currentUser.id;
+  const formId=parseInt(document.getElementById('o_form').value)||null;
+  const o={clientId, userId, date:dstr(0), startDate, dueDate, status:'진행중', formId,
     items:items.map(l=>({productId:l.productId,name:l.name,memo:l.memo,price:l.price,qty:l.qty})),
     buyItems};
   try{ const row=await dbIns('orders',o); orders.push(row); }catch(e){ return; }
@@ -1222,7 +1342,7 @@ function drawQuote(id){
   const qNo=`Q${o.date.replace(/-/g,'')}-${String(o.id).padStart(3,'0')}`;
   area.innerHTML=`
   <div class="quote-doc">
-    <h1>견 적 서</h1>
+    <h1>${esc(c?.name||'')} 견적서</h1>
     <div class="quote-underline">견적번호 ${qNo} &nbsp;·&nbsp; 견적일자 ${o.date} &nbsp;·&nbsp; 유효기간: 견적일로부터 30일</div>
     <div class="quote-meta">
       <div>
@@ -1243,11 +1363,16 @@ function drawQuote(id){
           <tr><td class="lbl">사업자번호</td><td>${esc(supplier.bizNo)}</td></tr>
           <tr><td class="lbl">대표자</td><td>${esc(supplier.ceo)} &nbsp;(인)</td></tr>
           <tr><td class="lbl">주소</td><td>${esc(supplier.addr)}</td></tr>
-          <tr><td class="lbl">연락처</td><td>${esc(supplier.phone)||'-'}</td></tr>
+          <tr><td class="lbl">담당자</td><td>${esc(userOf(o.userId)?.name||'')}</td></tr>
+          <tr><td class="lbl">연락처</td><td>${esc(userOf(o.userId)?.phone||'')}</td></tr>
+          <tr><td class="lbl">kakao</td><td>${esc(userOf(o.userId)?.kakao||'')}</td></tr>
         </table>
       </div>
     </div>
-    <div class="quote-total-line"><span>합계금액 (부가세 포함)</span><span>₩ ${wonS(grand)}</span></div>
+    <div class="quote-headline">
+      <div class="quote-box"><span class="lb">납품기간</span><span class="vl">${o.startDate} ~ ${o.dueDate}</span></div>
+      <div class="quote-box total"><span class="lb">합계금액 (VAT 포함)</span><span class="vl">₩ ${wonS(grand)}</span></div>
+    </div>
     <table class="quote-items">
       <thead><tr><th style="width:36px">No</th><th>품목</th><th>비고</th><th style="width:90px">단가</th><th style="width:56px">수량</th><th style="width:100px">공급가액</th></tr></thead>
       <tbody>
@@ -1262,13 +1387,18 @@ function drawQuote(id){
         <tr><td colspan="5" style="text-align:right">총 합계</td><td class="num" style="color:var(--stamp)">₩ ${wonS(grand)}</td></tr>
       </tfoot>
     </table>
-    <div class="quote-note">
-      · 납품기간: ${o.startDate} ~ ${o.dueDate}<br>
-      · 결제조건: 납품 후 세금계산서 발행, 익월 말 현금 결제<br>
-      · 본 견적은 발행일로부터 30일간 유효하며, 이후 단가는 변동될 수 있습니다.<br>
-      · 담당자: ${esc(userOf(o.userId)?.name||'-')}${supplier.email?` (${esc(supplier.email)})`:''}
-    </div>
+    <div class="quote-note">${quoteNoteHtml(o)}</div>
   </div>`;
+}
+
+const DEFAULT_NOTE='결제조건: 납품 후 세금계산서 발행, 익월 말 현금 결제\n본 견적은 발행일로부터 30일간 유효하며, 이후 단가는 변동될 수 있습니다.';
+function quoteFormOf(o){
+  return quoteForms.find(f=>f.id===o.formId) || quoteForms.find(f=>f.isDefault) || null;
+}
+function quoteNoteHtml(o){
+  const f=quoteFormOf(o);
+  const text=(f?f.note:DEFAULT_NOTE)||'';
+  return text.split('\n').filter(l=>l.trim()).map(l=>'· '+esc(l.trim())).join('<br>');
 }
 
 /* 견적서 이미지 복사 */
@@ -1304,9 +1434,81 @@ async function copyQuoteImage(){
 }
 
 /* ============================================================
+   견적서 양식 관리 (슈퍼어드민)
+============================================================ */
+function renderForms(){
+  if(currentUser.role!=='admin'){ document.getElementById('content').innerHTML='<div class="card"><div class="empty">슈퍼어드민만 접근할 수 있습니다.</div></div>'; return; }
+  document.getElementById('content').innerHTML=`
+  <div class="toolbar">
+    <div style="color:var(--muted);font-size:13px">견적서 하단에 표시될 안내 문구를 양식으로 저장합니다. 주문 등록 시 양식을 선택하면 해당 문구가 적용됩니다.</div>
+    <button class="btn btn-primary" onclick="formForm()">+ 양식 추가</button>
+  </div>
+  <div class="card"><div class="card-b flush">
+  ${quoteForms.length ? `<table><thead><tr><th style="width:150px">양식명</th><th>안내 문구</th><th style="width:80px">기본</th><th style="width:180px"></th></tr></thead><tbody>
+  ${quoteForms.map(f=>`<tr>
+    <td><b>${esc(f.name)}</b></td>
+    <td style="white-space:normal;color:var(--muted);font-size:13px;line-height:1.7">${(f.note||'').split('\n').filter(l=>l.trim()).map(l=>'· '+esc(l.trim())).join('<br>')||'<span style="color:var(--muted)">문구 없음</span>'}</td>
+    <td>${f.isDefault?'<span class="status-pill st-done">기본</span>':`<button class="mini-btn" onclick="setDefaultForm(${f.id})">기본 지정</button>`}</td>
+    <td style="text-align:right;white-space:nowrap">
+      <button class="mini-btn blue" onclick="formForm(${f.id})">수정</button>
+      <button class="mini-btn red" onclick="delForm(${f.id})">삭제</button>
+    </td>
+  </tr>`).join('')}
+  </tbody></table>` : '<div class="empty">등록된 양식이 없습니다. [+ 양식 추가]로 만들어보세요.<br><span style="font-size:12px">양식이 없으면 견적서에 기본 문구가 표시됩니다.</span></div>'}
+  </div></div>`;
+}
+function formForm(id){
+  const f=id?quoteForms.find(x=>x.id===id):{name:'',note:DEFAULT_NOTE,isDefault:quoteForms.length===0};
+  openModal(`
+  <div class="modal-h"><h3>${id?'양식 수정':'양식 추가'}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b">
+    <div class="field"><label>양식명 <span class="req">*</span></label><input id="f_fname" value="${esc(f.name)}" placeholder="예: 기본 양식, 선결제 양식"></div>
+    <div class="field"><label>하단 안내 문구</label>
+      <textarea id="f_fnote" rows="7" style="resize:vertical;line-height:1.7">${esc(f.note||'')}</textarea>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">한 줄에 하나씩 입력하세요. 각 줄 앞에 · 기호가 자동으로 붙습니다. 납품기간과 합계금액은 상단에 자동 표시되므로 여기 넣지 않아도 됩니다.</div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+      <input type="checkbox" id="f_fdefault" ${f.isDefault?'checked':''} style="width:auto"> 기본 양식으로 지정 (주문에서 양식을 고르지 않으면 이 문구가 사용됩니다)
+    </label>
+  </div>
+  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveForm(${id||0})">저장</button></div>`);
+}
+async function saveForm(id){
+  const name=document.getElementById('f_fname').value.trim();
+  const note=document.getElementById('f_fnote').value;
+  const isDefault=document.getElementById('f_fdefault').checked;
+  if(!name){ toast('양식명을 입력하세요'); return; }
+  try{
+    if(isDefault){
+      for(const f of quoteForms.filter(x=>x.isDefault&&x.id!==id)){ await dbUpd('quoteForms',f.id,{isDefault:false}); f.isDefault=false; }
+    }
+    if(id){ await dbUpd('quoteForms',id,{name,note,isDefault}); Object.assign(quoteForms.find(x=>x.id===id),{name,note,isDefault}); toast('양식을 수정했습니다'); }
+    else{ const row=await dbIns('quoteForms',{name,note,isDefault}); quoteForms.push(row); toast('양식을 추가했습니다'); }
+  }catch(e){ return; }
+  closeModal(); renderForms();
+}
+async function setDefaultForm(id){
+  try{
+    for(const f of quoteForms.filter(x=>x.isDefault)){ await dbUpd('quoteForms',f.id,{isDefault:false}); f.isDefault=false; }
+    await dbUpd('quoteForms',id,{isDefault:true}); quoteForms.find(x=>x.id===id).isDefault=true;
+  }catch(e){ return; }
+  renderForms(); toast('기본 양식으로 지정했습니다');
+}
+async function delForm(id){
+  if(orders.some(o=>o.formId===id)){ toast('이 양식을 사용 중인 주문이 있어 삭제할 수 없습니다'); return; }
+  if(!confirm('이 양식을 삭제할까요?')) return;
+  try{ await dbDel('quoteForms',id); }catch(e){ return; }
+  quoteForms=quoteForms.filter(f=>f.id!==id); renderForms(); toast('삭제했습니다');
+}
+
+/* ============================================================
    매출 ERP
 ============================================================ */
-function renderErp(){
+async function renderErp(){
+  if(sb) await loadAll();
+  renderErpUI();
+}
+function renderErpUI(){
   document.getElementById('content').innerHTML=`
   <div class="toolbar">
     <div class="filters">
@@ -1423,6 +1625,7 @@ function drawErp(){
   </tbody></table>` : '<div class="empty">기간 내 매출 데이터가 없습니다.</div>';
 
   drawSettle(list);
+  if(settleSelUser && (currentUser.role==='admin'||settleSelUser===currentUser.id)) settleDetail(settleSelUser);
 }
 
 /* ---- 직원별 정산 관리 ---- */
@@ -1453,7 +1656,9 @@ function drawSettle(list){
   </tr>`).join('')}
   </tbody></table>` : '<div class="empty">기간 내 정산할 주문이 없습니다.</div>';
 }
+let settleSelUser=null;
 function settleDetail(userId){
+  settleSelUser=userId;
   const {list}=erpFiltered();
   const u=userOf(userId);
   const mine=list.filter(o=>o.userId===userId).sort((a,b)=>b.date.localeCompare(a.date));
@@ -1473,7 +1678,7 @@ function settleDetail(userId){
     <td><span class="status-pill ${o.status==='완료'?'st-done':'st-ing'}">${o.status}</span></td>
   </tr>`;}).join('')}
   </tbody></table>` : '<div class="empty">기간 내 주문이 없습니다.</div>';
-  document.getElementById('settleDetail').scrollIntoView({behavior:'smooth',block:'nearest'});
+
 }
 function rateForm(userId){
   if(currentUser.role!=='admin'){ toast('정산율 변경은 슈퍼어드민만 가능합니다'); return; }
@@ -1606,45 +1811,69 @@ function renderUsers(){
     <button class="btn btn-primary" onclick="userForm()">+ 계정 생성</button>
   </div>
   <div class="card"><div class="card-b flush">
-  <table><thead><tr><th>이름</th><th>아이디</th><th>권한</th><th class="num">정산율</th><th class="num">등록 주문</th><th style="width:150px"></th></tr></thead><tbody>
+  <table><thead><tr><th>이름</th><th>아이디</th><th>권한</th><th>연락처</th><th>kakao</th><th class="num">정산율</th><th class="num">등록 주문</th><th style="width:190px"></th></tr></thead><tbody>
   ${users.map(u=>`<tr>
     <td><b>${esc(u.name)}</b></td><td>${esc(u.username)}</td>
     <td><span class="status-pill ${u.role==='admin'?'st-done':'st-ing'}">${u.role==='admin'?'슈퍼어드민':'팀원'}</span></td>
+    <td>${u.phone?esc(u.phone):'<span style="color:var(--muted)">미등록</span>'}</td>
+    <td>${u.kakao?esc(u.kakao):'<span style="color:var(--muted)">미등록</span>'}</td>
     <td class="num"><b>${u.rate||0}%</b></td>
     <td class="num">${orders.filter(o=>o.userId===u.id).length}건</td>
     <td style="text-align:right;white-space:nowrap">
+      <button class="mini-btn blue" onclick="userForm(${u.id})">정보수정</button>
       <button class="mini-btn" onclick="rateForm(${u.id})">정산율</button>
       ${u.role!=='admin'?`<button class="mini-btn red" onclick="delUser(${u.id})">삭제</button>`:''}
     </td>
   </tr>`).join('')}
   </tbody></table></div></div>`;
 }
-function userForm(){
+function userForm(uid){
+  const u=uid?userOf(uid):{name:'',username:'',phone:'',kakao:'',role:'member',rate:30};
   openModal(`
-  <div class="modal-h"><h3>계정 생성</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-h"><h3>${uid?'계정 정보 수정':'계정 생성'}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
-    <div class="field"><label>이름 <span class="req">*</span></label><input id="f_uname"></div>
+    <div class="field"><label>이름 <span class="req">*</span></label><input id="f_uname" value="${esc(u.name)}"></div>
     <div class="field-row">
-      <div class="field"><label>아이디 <span class="req">*</span></label><input id="f_uid"></div>
-      <div class="field"><label>비밀번호 <span class="req">*</span></label><input id="f_upw" type="password"></div>
+      <div class="field"><label>아이디 <span class="req">*</span></label><input id="f_uid" value="${esc(u.username)}" ${uid?'disabled':''}></div>
+      <div class="field"><label>비밀번호 ${uid?'<span style="font-weight:400;color:var(--muted)">(변경 시에만 입력)</span>':'<span class="req">*</span>'}</label><input id="f_upw" type="password" placeholder="${uid?'변경하지 않으려면 비워두세요':''}"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>권한</label><select id="f_urole"><option value="member">팀원</option><option value="admin">슈퍼어드민</option></select></div>
-      <div class="field"><label>정산율 (%)</label><input id="f_urate" type="number" min="0" max="100" value="30"></div>
+      <div class="field"><label>연락처</label><input id="f_uphone" value="${esc(u.phone||'')}" placeholder="010-0000-0000"></div>
+      <div class="field"><label>kakao</label><input id="f_ukakao" value="${esc(u.kakao||'')}" placeholder="카카오톡 ID"></div>
     </div>
+    <div class="field-row">
+      <div class="field"><label>권한</label><select id="f_urole"><option value="member" ${u.role==='member'?'selected':''}>팀원</option><option value="admin" ${u.role==='admin'?'selected':''}>슈퍼어드민</option></select></div>
+      <div class="field"><label>정산율 (%)</label><input id="f_urate" type="number" min="0" max="100" value="${u.rate||0}"></div>
+    </div>
+    <div style="font-size:12px;color:var(--muted)">연락처와 kakao는 이 담당자가 등록한 주문의 견적서에 표시됩니다. 비워두면 견적서에도 공란으로 나갑니다.</div>
   </div>
-  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveUser()">생성</button></div>`);
+  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveUser(${uid||0})">${uid?'저장':'생성'}</button></div>`);
 }
-async function saveUser(){
+async function saveUser(uid){
   const name=document.getElementById('f_uname').value.trim();
-  const uid=document.getElementById('f_uid').value.trim();
+  const id2=document.getElementById('f_uid').value.trim();
   const pw=document.getElementById('f_upw').value;
   const role=document.getElementById('f_urole').value;
-  if(!name||!uid||!pw){ toast('모든 항목을 입력하세요'); return; }
-  if(users.some(u=>u.username===uid)){ toast('이미 사용 중인 아이디입니다'); return; }
+  const phone=document.getElementById('f_uphone').value.trim();
+  const kakao=document.getElementById('f_ukakao').value.trim();
   const rate=Math.min(100,Math.max(0,parseInt(document.getElementById('f_urate').value)||0));
-  try{ const row=await dbIns('users',{username:uid, pw, name, role, rate}); users.push(row); }catch(e){ return; }
-  closeModal(); renderUsers(); toast('계정을 생성했습니다');
+  if(!name){ toast('이름을 입력하세요'); return; }
+  try{
+    if(uid){
+      const patch={name, role, rate, phone, kakao};
+      if(pw) patch.pw=pw;
+      await dbUpd('users',uid,patch);
+      Object.assign(userOf(uid),patch);
+      toast('계정 정보를 수정했습니다');
+    }else{
+      if(!id2||!pw){ toast('아이디와 비밀번호를 입력하세요'); return; }
+      if(users.some(u=>u.username===id2)){ toast('이미 사용 중인 아이디입니다'); return; }
+      const row=await dbIns('users',{username:id2, pw, name, role, rate, phone, kakao});
+      users.push(row);
+      toast('계정을 생성했습니다');
+    }
+  }catch(e){ return; }
+  closeModal(); renderUsers();
 }
 async function delUser(id){
   if(orders.some(o=>o.userId===id)){ toast('주문 이력이 있는 계정은 삭제할 수 없습니다'); return; }
