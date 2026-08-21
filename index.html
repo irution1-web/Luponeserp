@@ -357,7 +357,7 @@ const SB_URL='https://szmenayblndgwjitqtww.supabase.co';
 const SB_KEY='sb_publishable_BLlvvY7I-MKv2pAwYSSFdA_OYKO1Khg';
 const sb = window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null;
 
-let users=[], clients=[], suppliers=[], supCategories=[], supProducts=[], categories=[], products=[], orders=[], notifications=[], quoteForms=[], samples=[];
+let users=[], clients=[], suppliers=[], supCategories=[], supProducts=[], categories=[], products=[], orders=[], notifications=[], quoteForms=[], samples=[], clientProducts=[];
 
 async function dbIns(t,row){
   const {data,error}=await sb.from(t).insert(row).select().single();
@@ -373,12 +373,12 @@ async function dbDel(t,id){
   if(error){ console.error(t,error); toast('삭제 실패: '+(error.message||'서버 오류')); throw error; }
 }
 async function loadAll(){
-  const tables=['users','clients','suppliers','supCategories','supProducts','categories','products','orders','notifications','quoteForms','samples'];
+  const tables=['users','clients','suppliers','supCategories','supProducts','categories','products','orders','notifications','quoteForms','samples','clientProducts'];
   const res=await Promise.all(tables.map(t=>sb.from(t).select('*').order('id')));
   for(let i=0;i<res.length;i++){
     if(res[i].error){ console.error(tables[i],res[i].error); toast('데이터를 불러오지 못했습니다: '+tables[i]); return false; }
   }
-  [users,clients,suppliers,supCategories,supProducts,categories,products,orders,notifications,quoteForms,samples]=res.map(r=>r.data||[]);
+  [users,clients,suppliers,supCategories,supProducts,categories,products,orders,notifications,quoteForms,samples,clientProducts]=res.map(r=>r.data||[]);
   return true;
 }
 async function refreshData(){
@@ -701,11 +701,13 @@ function renderClientTable(){
   let list=myClients().filter(c=>c.name.toLowerCase().includes(q)||c.ceo.toLowerCase().includes(q));
   if(uf) list=list.filter(c=>c.userId===uf);
   document.getElementById('clientTable').innerHTML = list.length ? `
-  <table><thead><tr><th>상호명</th><th>사업자등록번호</th><th>대표자</th><th>연락처</th><th>이메일</th><th>담당자</th><th style="width:120px"></th></tr></thead><tbody>
+  <table><thead><tr><th>상호명</th><th>사업자등록번호</th><th>대표자</th><th>연락처</th><th>담당자</th><th class="num">판매상품</th><th style="width:210px"></th></tr></thead><tbody>
   ${list.map(c=>`<tr>
-    <td><b>${esc(c.name)}</b></td><td>${esc(c.bizNo)}</td><td>${esc(c.ceo)}</td><td>${esc(c.phone)}</td><td>${esc(c.email)}</td>
+    <td><b>${esc(c.name)}</b></td><td>${esc(c.bizNo)}</td><td>${esc(c.ceo)}</td><td>${esc(c.phone)}</td>
     <td>${c.userId?esc(userOf(c.userId)?.name||'-'):'<span style="color:var(--muted)">미지정</span>'}</td>
+    <td class="num"><b>${clientProducts.filter(x=>x.clientId===c.id).length}</b>개</td>
     <td style="text-align:right;white-space:nowrap">
+      <button class="mini-btn blue" onclick="cpForm(${c.id})">판매상품</button>
       <button class="mini-btn" onclick="clientForm(${c.id})">수정</button>
       <button class="mini-btn red" onclick="delClient(${c.id})">삭제</button>
     </td></tr>`).join('')}
@@ -746,8 +748,65 @@ async function saveClient(id){
 async function delClient(id){
   if(orders.some(o=>o.clientId===id)){ toast('주문 이력이 있는 거래처는 삭제할 수 없습니다'); return; }
   if(!confirm('이 거래처를 삭제할까요?')) return;
-  try{ await dbDel('clients',id); }catch(e){ return; }
+  try{
+    for(const cp of clientProducts.filter(x=>x.clientId===id)) await dbDel('clientProducts',cp.id);
+    clientProducts=clientProducts.filter(x=>x.clientId!==id);
+    await dbDel('clients',id);
+  }catch(e){ return; }
   clients=clients.filter(c=>c.id!==id); renderClients(); toast('삭제했습니다');
+}
+
+/* ---- 거래처별 판매 상품 · 단가 ---- */
+function canEditClient(c){ return currentUser.role==='admin' || c.userId===currentUser.id; }
+function cpForm(clientId){
+  const c=clientOf(clientId);
+  if(!canEditClient(c)){ toast('담당자 또는 슈퍼어드민만 관리할 수 있습니다'); return; }
+  const list=clientProducts.filter(x=>x.clientId===clientId);
+  openModal(`
+  <div class="modal-h"><h3>판매 상품 · 단가 · ${esc(c.name)}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b" style="max-height:62vh;overflow:auto">
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">이 거래처에 판매 중인 상품과 전용 단가입니다. 주문 등록 시 이 목록에서만 선택할 수 있고, 단가가 자동 입력됩니다.</div>
+    ${list.length?`<table style="margin-bottom:14px"><thead><tr><th>상품</th><th class="num">기본가</th><th class="num" style="width:120px">전용 단가</th><th style="width:50px"></th></tr></thead><tbody>
+      ${list.map(cp=>{
+        const p=products.find(x=>x.id===cp.productId);
+        return `<tr>
+          <td><b>${esc(p?.name||'삭제된 상품')}</b></td>
+          <td class="num" style="color:var(--muted)">${p?wonS(p.price):'-'}</td>
+          <td class="num"><input type="number" min="0" value="${cp.price}" style="text-align:right;padding:5px 8px" onchange="updCpPrice(${cp.id},this.value)"></td>
+          <td style="text-align:right"><button class="mini-btn red" onclick="delCp(${cp.id},${clientId})">삭제</button></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table>`:'<div class="empty" style="padding:20px">등록된 판매 상품이 없습니다.</div>'}
+    <div class="sec-head"><span class="t sell">상품 추가</span></div>
+    ${sortedCategories().map(cat=>{
+      const ps=products.filter(p=>p.catId===cat.id && !list.some(x=>x.productId===p.id));
+      if(!ps.length) return '';
+      return `<div class="acc open" id="cpk-${cat.id}">
+        <div class="acc-h" onclick="document.getElementById('cpk-${cat.id}').classList.toggle('open')">
+          <span>${esc(cat.name)}<span class="acc-count">${ps.length}개</span></span><span class="arrow">▶</span>
+        </div>
+        <div class="acc-body">
+          ${ps.map(p=>`<div class="acc-item pickable" onclick="addCp(${clientId},${p.id})">
+            <span class="p-name">${esc(p.name)}</span><span class="p-price">기본가 ${won(p.price)} · 추가 +</span>
+          </div>`).join('')}
+        </div></div>`;
+    }).join('')||'<div style="color:var(--muted);font-size:13px;padding:8px 0">추가할 수 있는 상품이 없습니다. 상품 관리에서 먼저 등록하세요.</div>'}
+  </div>
+  <div class="modal-f"><button class="btn btn-primary" onclick="closeModal();renderClients()">완료</button></div>`, true);
+}
+async function addCp(clientId, productId){
+  const p=products.find(x=>x.id===productId);
+  try{ const row=await dbIns('clientProducts',{clientId, productId, price:p.price}); clientProducts.push(row); }catch(e){ return; }
+  toast('판매 상품을 추가했습니다'); cpForm(clientId);
+}
+async function updCpPrice(id, val){
+  const price=parseInt(val)||0;
+  try{ await dbUpd('clientProducts',id,{price}); Object.assign(clientProducts.find(x=>x.id===id),{price}); }catch(e){ return; }
+  toast('단가를 저장했습니다');
+}
+async function delCp(id, clientId){
+  try{ await dbDel('clientProducts',id); }catch(e){ return; }
+  clientProducts=clientProducts.filter(x=>x.id!==id); toast('삭제했습니다'); cpForm(clientId);
 }
 
 /* ============================================================
@@ -1084,6 +1143,10 @@ function renderOrderNew(){
 /* 작업 일수 ↔ 마감일 자동 계산 (시작일 포함) */
 /* 거래처 선택 시 그 거래처 담당자를 주문 담당자로 자동 지정 (어드민만 변경 가능) */
 function syncOrderOwner(){
+  if(draftSell.some(l=>l.productId)){
+    draftSell=draftSell.map(l=>l.productId?{...l,productId:null,name:'',price:0}:l);
+    renderSellLines(); toast('거래처가 변경되어 선택한 상품이 초기화되었습니다');
+  }
   if(currentUser.role!=='admin') return;
   const cid=parseInt(document.getElementById('o_client').value)||0;
   const c=clientOf(cid);
@@ -1165,26 +1228,36 @@ function updTotal(){
 
 /* 아코디언 상품 선택 모달 (판매) */
 function openPicker(lineIdx){
+  const cid=parseInt(document.getElementById('o_client')?.value)||0;
+  if(!cid){ toast('거래처를 먼저 선택하세요'); return; }
+  const c=clientOf(cid);
+  const cps=clientProducts.filter(x=>x.clientId===cid);
   openModal(`
-  <div class="modal-h"><h3>상품 선택</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-h"><h3>상품 선택 · ${esc(c?.name||'')}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
   <div class="modal-b" style="max-height:60vh;overflow:auto">
-    ${sortedCategories().map(cat=>{
-      const ps=products.filter(p=>p.catId===cat.id);
-      return `<div class="acc" id="pk-${cat.id}">
+    ${cps.length ? sortedCategories().map(cat=>{
+      const rows=cps.filter(cp=>products.find(p=>p.id===cp.productId)?.catId===cat.id);
+      if(!rows.length) return '';
+      return `<div class="acc open" id="pk-${cat.id}">
         <div class="acc-h" onclick="document.getElementById('pk-${cat.id}').classList.toggle('open')">
-          <span>${esc(cat.name)}<span class="acc-count">${ps.length}개</span></span><span class="arrow">▶</span>
+          <span>${esc(cat.name)}<span class="acc-count">${rows.length}개</span></span><span class="arrow">▶</span>
         </div>
         <div class="acc-body">
-          ${ps.length ? ps.map(p=>`<div class="acc-item pickable" onclick="pickProduct(${lineIdx},${p.id})">
-            <span><span class="p-name">${esc(p.name)}</span><span class="acc-count">· ${prodSupLabel(p)}</span></span><span class="p-price">${won(p.price)}</span>
-          </div>`).join('') : '<div class="acc-item" style="color:var(--muted)">상품 없음</div>'}
+          ${rows.map(cp=>{
+            const p=products.find(x=>x.id===cp.productId);
+            return `<div class="acc-item pickable" onclick="pickProduct(${lineIdx},${p.id},${cp.price})">
+              <span><span class="p-name">${esc(p.name)}</span><span class="acc-count">· ${prodSupLabel(p)}</span></span><span class="p-price"><b>${won(cp.price)}</b></span>
+            </div>`;
+          }).join('')}
         </div></div>`;
-    }).join('') || '<div class="empty">상품 관리에서 카테고리와 상품을 먼저 등록하세요.</div>'}
+    }).join('')
+    : `<div class="empty">이 거래처에 등록된 판매 상품이 없습니다.<br><span style="font-size:12px">거래처 관리 → [판매상품]에서 먼저 등록해주세요.</span></div>`}
   </div>`, true);
 }
-function pickProduct(lineIdx, pid){
+function pickProduct(lineIdx, pid, cpPrice){
   const p=products.find(x=>x.id===pid);
-  draftSell[lineIdx]={...draftSell[lineIdx], productId:p.id, name:p.name, price:p.price};
+  const price = (cpPrice!==undefined && cpPrice!==null) ? cpPrice : p.price;
+  draftSell[lineIdx]={...draftSell[lineIdx], productId:p.id, name:p.name, price};
   closeModal(); renderSellLines();
   autoLinkBuy(p, draftSell[lineIdx].qty||1);
 }
@@ -1769,6 +1842,10 @@ function renderErpUI(){
     <div class="card"><div class="card-h"><h3>거래처별 매출 순위</h3></div><div class="card-b flush" id="erpRank"></div></div>
   </div>
   <div class="card" style="margin-top:16px">
+    <div class="card-h"><h3>📅 월별 적립 정산금</h3><span style="font-size:12px;color:var(--muted)">최근 6개월 · 월별로 쌓인 정산금 합계</span></div>
+    <div class="card-b flush" id="erpMonthly"></div>
+  </div>
+  <div class="card" style="margin-top:16px">
     <div class="card-h"><h3>💰 직원별 정산 관리</h3><span style="font-size:12px;color:var(--muted)">정산금 = 마진(판매−원가) × 직원 정산율 · 직원을 클릭하면 건별 내역이 표시됩니다</span></div>
     <div class="card-b flush" id="erpSettle"></div>
   </div>
@@ -1857,7 +1934,35 @@ function drawErp(){
   </tbody></table>` : '<div class="empty">기간 내 매출 데이터가 없습니다.</div>';
 
   drawSettle(list);
+  drawMonthlySettle();
   if(settleSelUser && (currentUser.role==='admin'||settleSelUser===currentUser.id)) settleDetail(settleSelUser);
+}
+
+/* 월별 적립 정산금 (기간 필터와 무관하게 최근 6개월) */
+function drawMonthlySettle(){
+  const isAdmin=currentUser.role==='admin';
+  const staff=isAdmin?users:[currentUser];
+  const st=document.getElementById('erpStatus')?.value||'';
+  const months=[];
+  for(let i=5;i>=0;i--){ const d=new Date(today); d.setDate(1); d.setMonth(d.getMonth()-i); months.push(ymd(d).slice(0,7)); }
+  const rows=staff.map(u=>{
+    const mine=orders.filter(o=>o.userId===u.id && (!st||o.status===st));
+    const vals=months.map(m=>{
+      const mo=mine.filter(o=>o.date.startsWith(m));
+      const margin=mo.reduce((sum,o)=>sum+orderMargin(o),0);
+      return settleAmt(margin,u.rate);
+    });
+    return {u, vals, total:vals.reduce((a,b)=>a+b,0)};
+  }).filter(r=>isAdmin?true:true);
+
+  document.getElementById('erpMonthly').innerHTML=`
+  <table><thead><tr><th>직원</th>${months.map(m=>`<th class="num">${parseInt(m.slice(5))}월</th>`).join('')}<th class="num">누적 합계</th></tr></thead><tbody>
+  ${rows.map(r=>`<tr>
+    <td><b>${esc(r.u.name)}</b> <span style="font-size:11px;color:var(--muted)">${r.u.rate||0}%</span></td>
+    ${r.vals.map((v,i)=>`<td class="num" style="${i===r.vals.length-1?'font-weight:700;background:var(--primary-soft)':''}">${v?wonS(v):'-'}</td>`).join('')}
+    <td class="num" style="font-weight:800;color:var(--primary)">${wonS(r.total)}</td>
+  </tr>`).join('')}
+  </tbody></table>`;
 }
 
 /* ---- 직원별 정산 관리 ---- */
