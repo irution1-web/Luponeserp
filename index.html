@@ -435,7 +435,15 @@ async function doLogin(){
     if(!u){ err.textContent='아이디 또는 비밀번호가 올바르지 않습니다.'; err.style.display='block'; return; }
     currentUser=u;
     if(!await loadAll()){ currentUser=null; err.textContent='데이터를 불러오지 못했습니다.'; err.style.display='block'; return; }
+    saveSession(u.id);
   } finally { btn.disabled=false; btn.textContent='로그인'; }
+  enterApp();
+  showFeedbackPopup();
+}
+
+/* 로그인 후 화면 진입 */
+function enterApp(){
+  const u=currentUser;
   document.getElementById('loginView').style.display='none';
   document.getElementById('appView').style.display='block';
   document.getElementById('sideUserName').textContent=u.name;
@@ -443,8 +451,25 @@ async function doLogin(){
   document.getElementById('navUsers').style.display=u.role==='admin'?'flex':'none';
   document.getElementById('navForms').style.display=u.role==='admin'?'flex':'none';
   go('dashboard');
-  showFeedbackPopup();
 }
+
+/* 새로고침해도 로그인 유지 */
+function saveSession(id){ try{ localStorage.setItem('lufons_uid', String(id)); }catch(e){} }
+function clearSession(){ try{ localStorage.removeItem('lufons_uid'); }catch(e){} }
+async function restoreSession(){
+  let uid=null;
+  try{ uid=localStorage.getItem('lufons_uid'); }catch(e){}
+  if(!uid||!sb) return;
+  try{
+    const {data:u,error}=await sb.from('users').select('*').eq('id',uid).maybeSingle();
+    if(error||!u){ clearSession(); return; }
+    currentUser=u;
+    if(!await loadAll()){ currentUser=null; return; }
+    enterApp();
+    showFeedbackPopup();
+  }catch(e){ clearSession(); }
+}
+window.addEventListener('DOMContentLoaded',restoreSession);
 
 /* 관리자 피드백 요청 알림 */
 async function sendPing(userId, orderId){
@@ -488,7 +513,7 @@ async function readPings(){
   await sb.from('notifications').update({read:true}).eq('toUserId',currentUser.id);
 }
 function logout(){
-  currentUser=null;
+  currentUser=null; clearSession();
   document.getElementById('appView').style.display='none';
   document.getElementById('loginView').style.display='flex';
   document.getElementById('loginId').value=''; document.getElementById('loginPw').value='';
@@ -501,7 +526,8 @@ function go(page, param){
   document.getElementById('pageTitle').textContent=titles[page];
   document.getElementById('bellPanel').classList.remove('open');
   renderBell();
-  ({dashboard:renderDashboard,orderNew:renderOrderNew,orders:renderOrders,quote:()=>renderQuote(param),clients:renderClients,suppliers:renderSuppliers,products:renderProducts,forms:renderForms,erp:renderErp,users:renderUsers})[page]();
+  const fn=({dashboard:renderDashboard,orderNew:renderOrderNew,orders:renderOrders,quote:()=>renderQuote(param),clients:renderClients,suppliers:renderSuppliers,products:renderProducts,forms:renderForms,erp:renderErp,users:renderUsers})[page];
+  try{ const r=fn&&fn(); if(r&&r.catch) r.catch(e=>console.error(page,e)); }catch(e){ console.error(page,e); }
   document.querySelector('.main').scrollTop=0; window.scrollTo(0,0);
 }
 
@@ -1364,11 +1390,10 @@ function drawQuote(id){
       </div>
       <div class="supplier-stamp">
         <h4>공급자</h4>
-        <div class="stamp-seal">${esc(supplier.name.replace(/[()주식회사·주]/g,'').slice(0,2)||'인')}<br>印</div>
         <table>
           <tr><td class="lbl">상호명</td><td>${esc(supplier.name)}</td></tr>
           <tr><td class="lbl">사업자번호</td><td>${esc(supplier.bizNo)}</td></tr>
-          <tr><td class="lbl">대표자</td><td>${esc(supplier.ceo)} &nbsp;(인)</td></tr>
+          <tr><td class="lbl">대표자</td><td>${esc(supplier.ceo)}</td></tr>
           <tr><td class="lbl">주소</td><td>${esc(supplier.addr)}</td></tr>
           <tr><td class="lbl">담당자</td><td>${esc(userOf(o.userId)?.name||'')}</td></tr>
           <tr><td class="lbl">연락처</td><td>${esc(userOf(o.userId)?.phone||'')}</td></tr>
