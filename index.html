@@ -1239,27 +1239,59 @@ function openPicker(lineIdx){
   if(!cid){ toast('거래처를 먼저 선택하세요'); return; }
   const c=clientOf(cid);
   const cps=clientProducts.filter(x=>x.clientId===cid);
+  const usedIds=cps.map(x=>x.productId);
   openModal(`
   <div class="modal-h"><h3>상품 선택 · ${esc(c?.name||'')}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
   <div class="modal-b" style="max-height:60vh;overflow:auto">
-    ${cps.length ? sortedCategories().map(cat=>{
-      const rows=cps.filter(cp=>products.find(p=>p.id===cp.productId)?.catId===cat.id);
-      if(!rows.length) return '';
-      return `<div class="acc open" id="pk-${cat.id}">
-        <div class="acc-h" onclick="document.getElementById('pk-${cat.id}').classList.toggle('open')">
-          <span>${esc(cat.name)}<span class="acc-count">${rows.length}개</span></span><span class="arrow">▶</span>
+    ${cps.length ? `
+      <div class="sec-head"><span class="t sell">⭐ 이 거래처 판매 상품</span><span style="font-size:11px;color:var(--muted)">전용 단가 적용</span></div>
+      ${sortedCategories().map(cat=>{
+        const rows=cps.filter(cp=>products.find(p=>p.id===cp.productId)?.catId===cat.id);
+        if(!rows.length) return '';
+        return `<div class="acc open" id="pk-${cat.id}">
+          <div class="acc-h" onclick="document.getElementById('pk-${cat.id}').classList.toggle('open')">
+            <span>${esc(cat.name)}<span class="acc-count">${rows.length}개</span></span><span class="arrow">▶</span>
+          </div>
+          <div class="acc-body">
+            ${rows.map(cp=>{
+              const p=products.find(x=>x.id===cp.productId);
+              return `<div class="acc-item pickable" onclick="pickProduct(${lineIdx},${p.id},${cp.price})">
+                <span><span class="p-name">${esc(p.name)}</span><span class="acc-count">· ${prodSupLabel(p)}</span></span><span class="p-price"><b>${won(cp.price)}</b></span>
+              </div>`;
+            }).join('')}
+          </div></div>`;
+      }).join('')}
+    ` : `<div style="background:var(--amber-soft);color:var(--amber);font-size:12.5px;font-weight:600;padding:10px 12px;border-radius:8px;margin-bottom:12px">
+        아직 이 거래처 전용 단가가 없어 기본 판매가로 표시됩니다. 선택하면 이 거래처 판매 상품으로 자동 등록돼요.
+      </div>`}
+
+    <div class="sec-head" style="margin-top:${cps.length?'14px':'0'}"><span class="t buy" style="background:var(--paper);color:var(--muted)">전체 상품</span><span style="font-size:11px;color:var(--muted)">선택 시 이 거래처에 자동 등록</span></div>
+    ${sortedCategories().map(cat=>{
+      const ps=products.filter(p=>p.catId===cat.id && !usedIds.includes(p.id));
+      if(!ps.length) return '';
+      return `<div class="acc ${cps.length?'':'open'}" id="pkall-${cat.id}">
+        <div class="acc-h" onclick="document.getElementById('pkall-${cat.id}').classList.toggle('open')">
+          <span>${esc(cat.name)}<span class="acc-count">${ps.length}개</span></span><span class="arrow">▶</span>
         </div>
         <div class="acc-body">
-          ${rows.map(cp=>{
-            const p=products.find(x=>x.id===cp.productId);
-            return `<div class="acc-item pickable" onclick="pickProduct(${lineIdx},${p.id},${cp.price})">
-              <span><span class="p-name">${esc(p.name)}</span><span class="acc-count">· ${prodSupLabel(p)}</span></span><span class="p-price"><b>${won(cp.price)}</b></span>
-            </div>`;
-          }).join('')}
+          ${ps.map(p=>`<div class="acc-item pickable" onclick="pickNewProduct(${lineIdx},${p.id},${cid})">
+            <span><span class="p-name">${esc(p.name)}</span><span class="acc-count">· ${prodSupLabel(p)}</span></span><span class="p-price">${won(p.price)}</span>
+          </div>`).join('')}
         </div></div>`;
-    }).join('')
-    : `<div class="empty">이 거래처에 등록된 판매 상품이 없습니다.<br><span style="font-size:12px">거래처 관리 → [판매상품]에서 먼저 등록해주세요.</span></div>`}
+    }).join('') || (cps.length?'<div style="color:var(--muted);font-size:13px;padding:8px 2px">추가로 선택할 상품이 없습니다.</div>':'<div class="empty">상품 관리에서 카테고리와 상품을 먼저 등록하세요.</div>')}
   </div>`, true);
+}
+/* 전체 목록에서 처음 선택 → 거래처 판매상품으로 자동 등록 */
+async function pickNewProduct(lineIdx, pid, cid){
+  const p=products.find(x=>x.id===pid);
+  pickProduct(lineIdx, pid, p.price);
+  if(!clientProducts.some(x=>x.clientId===cid && x.productId===pid)){
+    try{
+      const row=await dbIns('clientProducts',{clientId:cid, productId:pid, price:p.price});
+      clientProducts.push(row);
+      toast(`${clientOf(cid)?.name||''} 판매 상품으로 등록했습니다`);
+    }catch(e){}
+  }
 }
 function pickProduct(lineIdx, pid, cpPrice){
   const p=products.find(x=>x.id===pid);
