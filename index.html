@@ -634,14 +634,14 @@ function logout(){
   document.getElementById('loginId').value=''; document.getElementById('loginPw').value='';
   document.getElementById('loginErr').style.display='none';
 }
-const titles={dashboard:'대시보드',orderNew:'주문 등록',orderEdit:'주문 수정',orders:'주문 목록',quote:'견적서',clients:'거래처 관리',suppliers:'공급사 관리',products:'상품 관리',forms:'견적서 양식',erp:'매출 ERP',users:'계정 관리'};
+const titles={dashboard:'대시보드',orderNew:'주문 등록',orderEdit:'주문 수정',orderRenew:'주문 연장',orders:'주문 목록',quote:'견적서',clients:'거래처 관리',suppliers:'공급사 관리',products:'상품 관리',forms:'견적서 양식',erp:'매출 ERP',users:'계정 관리'};
 function go(page, param, skipHistory){
   currentPage=page;
-  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===(page==='orderEdit'?'orders':page)));
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===((page==='orderEdit'||page==='orderRenew')?'orders':page)));
   document.getElementById('pageTitle').textContent=titles[page];
   document.getElementById('bellPanel').classList.remove('open');
   renderBell();
-  const fn=({dashboard:renderDashboard,orderNew:()=>renderOrderNew(),orderEdit:()=>renderOrderNew(param),orders:renderOrders,quote:()=>renderQuote(param),clients:renderClients,suppliers:renderSuppliers,products:renderProducts,forms:renderForms,erp:renderErp,users:renderUsers})[page];
+  const fn=({dashboard:renderDashboard,orderNew:()=>renderOrderNew(),orderEdit:()=>renderOrderNew(param),orderRenew:()=>renderOrderNew(param,'renew'),orders:renderOrders,quote:()=>renderQuote(param),clients:renderClients,suppliers:renderSuppliers,products:renderProducts,forms:renderForms,erp:renderErp,users:renderUsers})[page];
   try{ const r=fn&&fn(); if(r&&r.catch) r.catch(e=>console.error(page,e)); }catch(e){ console.error(page,e); }
   document.querySelector('.main').scrollTop=0; window.scrollTo(0,0);
   if(!skipHistory){
@@ -1189,16 +1189,28 @@ async function delProd(id){
    주문 등록
 ============================================================ */
 let draftSell=[], draftBuy=[];
-let editOrderId=null;
-function renderOrderNew(orderId){
-  editOrderId = orderId||null;
-  const eo = orderId ? orders.find(o=>o.id===orderId) : null;
+let editOrderId=null, renewFromId=null;
+function renderOrderNew(orderId, mode){
+  const isRenew = mode==='renew';
+  editOrderId = (orderId && !isRenew) ? orderId : null;
+  renewFromId = isRenew ? orderId : null;
+  const src = orderId ? orders.find(o=>o.id===orderId) : null;
+  const eo = src ? {...src} : null;
   draftSell = eo ? eo.items.map(i=>({...i})) : [];
   draftBuy  = eo ? (eo.buyItems||[]).map(i=>({...i})) : [];
   const days = eo ? (Math.round((new Date(eo.dueDate+'T00:00:00')-new Date(eo.startDate+'T00:00:00'))/86400000)+1) : 7;
+  if(isRenew && eo){
+    // 연장: 기존 마감일 다음 날부터 같은 기간으로
+    const ns=new Date(eo.dueDate+'T00:00:00'); ns.setDate(ns.getDate()+1);
+    const nd=new Date(ns); nd.setDate(nd.getDate()+days-1);
+    eo.startDate=ymd(ns); eo.dueDate=ymd(nd);
+  }
   document.getElementById('content').innerHTML=`
   <div class="card" style="max-width:1040px">
-    <div class="card-h"><h3>${eo?'주문 수정':'새 주문 등록'}</h3>${eo?`<span style="font-size:12px;color:var(--muted)">등록일 ${eo.date}</span>`:''}</div>
+    <div class="card-h"><h3>${isRenew?'🔁 주문 연장 등록':eo?'주문 수정':'새 주문 등록'}</h3>${isRenew?`<span style="font-size:12px;color:var(--muted)">원본: ${src.date} · ${esc(clientOf(src.clientId)?.name||'')} (${src.startDate} ~ ${src.dueDate})</span>`:eo?`<span style="font-size:12px;color:var(--muted)">등록일 ${eo.date}</span>`:''}</div>
+    ${isRenew?`<div style="margin:16px 20px 0;background:var(--primary-soft);color:var(--primary);font-size:13px;font-weight:600;padding:11px 14px;border-radius:8px">
+      이전 주문서 내용이 그대로 복사됐어요. 기간·수량·단가 등 필요한 부분만 수정하고 저장하면 새 주문으로 등록됩니다.
+    </div>`:''}
     <div class="card-b">
       <div class="field-row" style="grid-template-columns:1.6fr 1fr;margin-bottom:8px">
         <div class="field"><label>거래처 <span class="req">*</span></label>
@@ -1245,8 +1257,11 @@ function renderOrderNew(orderId){
         <span class="grand">합계 <b id="tGrand">0원</b></span>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+        ${isRenew?`<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-right:auto;cursor:pointer">
+          <input type="checkbox" id="o_closeOld" checked style="width:16px;height:16px"> 기존 주문을 <b>완료 처리</b> (알림에서 제외)
+        </label>`:''}
         <button class="btn btn-ghost" onclick="go('orders')">취소</button>
-        <button class="btn btn-primary" style="padding:11px 28px" onclick="saveOrder()">${eo?'수정 저장':'주문 저장'}</button>
+        <button class="btn btn-primary" style="padding:11px 28px" onclick="saveOrder()">${isRenew?'연장 등록':eo?'수정 저장':'주문 저장'}</button>
       </div>
     </div>
   </div>`;
@@ -1487,12 +1502,17 @@ async function saveOrder(){
       Object.assign(orders.find(o=>o.id===editOrderId),payload);
       toast('주문을 수정했습니다');
     }else{
-      const row=await dbIns('orders',{...payload, date:dstr(0), status:'진행중'});
+      const extra = renewFromId ? {renewedFrom:renewFromId} : {};
+      const row=await dbIns('orders',{...payload, date:dstr(0), status:'진행중', ...extra});
       orders.push(row);
-      toast('주문을 저장했습니다');
+      if(renewFromId && document.getElementById('o_closeOld')?.checked){
+        const old=orders.find(o=>o.id===renewFromId);
+        if(old && old.status!=='완료'){ await dbUpd('orders',old.id,{status:'완료'}); old.status='완료'; }
+      }
+      toast(renewFromId?'주문을 연장 등록했습니다':'주문을 저장했습니다');
     }
   }catch(e){ return; }
-  editOrderId=null;
+  editOrderId=null; renewFromId=null;
   go('orders');
 }
 
@@ -1630,7 +1650,7 @@ function renderOrderTable(){
       <td><b>${o.date}</b></td>
       <td>${dChip(o)}</td>
       <td>${statePill(o)}</td>
-      <td><b>${esc(c?.name||'-')}</b></td>
+      <td><b>${esc(c?.name||'-')}</b>${o.renewedFrom?' <span class="dchip d-ok" style="font-size:10px;padding:1px 6px" title="연장 주문">연장</span>':''}</td>
       <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.items.map(i=>i.name).join(', '))}">${itemLabel}</td>
       <td class="num"><b>${wonS(grand)}</b></td>
       <td class="num ${margin>=0?'margin-pos':'margin-neg'}" style="font-weight:700">${wonS(margin)}<span style="font-size:11px;color:var(--muted);font-weight:500"> (${total>0?Math.round(margin/total*100):0}%)</span></td>
@@ -1643,6 +1663,7 @@ function renderOrderTable(){
             <button onclick="closeActMenus();orderDetail(${o.id})">상세 보기</button>
             <button class="blue" onclick="closeActMenus();go('orderEdit',${o.id})">주문 수정</button>
             <button class="blue" onclick="closeActMenus();go('quote',${o.id})">견적서</button>
+            <button class="blue" onclick="closeActMenus();go('orderRenew',${o.id})">🔁 연장 처리</button>
             <button onclick="closeActMenus();toggleStatus(${o.id})">${o.status==='완료'?'진행중으로 변경':'완료 처리'}</button>
             <button class="red" onclick="closeActMenus();delOrder(${o.id})">삭제</button>
           </div>
@@ -1671,7 +1692,7 @@ function orderDetail(id){
   <div class="modal-h"><h3>주문 상세 · ${esc(c?.name||'-')}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
   <div class="modal-b" style="max-height:65vh;overflow:auto">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:13px;margin-bottom:16px">
-      <div><b style="color:var(--muted)">등록일</b> ${o.date}</div>
+      <div><b style="color:var(--muted)">등록일</b> ${o.date}${o.renewedFrom?' <span class="dchip d-ok" style="font-size:10px;padding:1px 6px">연장 주문</span>':''}</div>
       <div><b style="color:var(--muted)">담당자</b> ${esc(userOf(o.userId)?.name||'-')}</div>
       <div><b style="color:var(--muted)">납품기간</b> ${o.startDate} ~ ${o.dueDate}</div>
       <div><b style="color:var(--muted)">상태</b> ${statePill(o)} ${dChip(o)}</div>
@@ -1697,6 +1718,7 @@ function orderDetail(id){
   </div>
   <div class="modal-f">
     <button class="btn btn-ghost" onclick="closeModal();go('quote',${o.id})">견적서 보기</button>
+    <button class="btn btn-ghost" onclick="closeModal();go('orderRenew',${o.id})">🔁 연장 처리</button>
     <button class="btn btn-primary" onclick="closeModal();go('orderEdit',${o.id})">주문 수정</button>
   </div>`, true);
 }
