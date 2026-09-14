@@ -150,6 +150,15 @@ th.num{text-align:right}
 .act-menu button.red{color:var(--stamp)}
 .act-menu button.blue{color:var(--primary);font-weight:600}
 .orders-table td,.orders-table th{padding:10px 8px;font-size:13px}
+.bulk-bar{display:none;align-items:center;gap:10px;padding:10px 14px;background:var(--ink);color:#fff;border-radius:10px;margin-bottom:12px;flex-wrap:wrap}
+.bulk-bar.show{display:flex}
+.bulk-bar .cnt{font-weight:800;background:var(--primary);padding:3px 10px;border-radius:20px;font-size:13px}
+.bulk-bar .btn{padding:7px 14px;font-size:13px}
+.bulk-bar .btn-ghost{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.25);color:#fff}
+.bulk-bar .btn-ghost:hover{background:rgba(255,255,255,.2)}
+.bulk-bar .btn-danger{background:var(--stamp);color:#fff}
+.chk{width:17px;height:17px;cursor:pointer;accent-color:var(--primary)}
+tr.selected{background:var(--primary-soft)!important}
 .empty{padding:40px;text-align:center;color:var(--muted)}
 .link{color:var(--primary);font-weight:600;cursor:pointer;background:none;padding:0}
 .mini-btn{padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:#fff;font-size:12px;font-weight:600}
@@ -1452,8 +1461,79 @@ function renderOrders(){
     <button class="btn btn-primary" onclick="go('orderNew')">+ 주문 등록</button>
   </div>
   <div class="tabs" id="orderTabs"></div>
+  <div class="bulk-bar" id="bulkBar">
+    <span class="cnt" id="bulkCnt">0</span><span style="font-weight:600">건 선택됨</span>
+    <span style="flex:1"></span>
+    <button class="btn btn-ghost" onclick="bulkStatus('완료')">✓ 완료 처리</button>
+    <button class="btn btn-ghost" onclick="bulkStatus('진행중')">↺ 진행중으로</button>
+    <button class="btn btn-ghost" onclick="bulkPaid(true)">💰 입금 완료</button>
+    <button class="btn btn-ghost" onclick="bulkPaid(false)">입금 해제</button>
+    ${currentUser.role==='admin'?`<button class="btn btn-ghost" onclick="bulkAssign()">👤 담당자 변경</button>`:''}
+    <button class="btn btn-danger" onclick="bulkDelete()">🗑 삭제</button>
+    <button class="btn btn-ghost" onclick="clearSel()">선택 해제</button>
+  </div>
   <div class="card"><div class="card-b flush" id="orderTable"></div></div>`;
+  selectedIds=new Set();
   renderOrderTable();
+}
+let selectedIds=new Set();
+function toggleSel(id, checked){
+  if(checked) selectedIds.add(id); else selectedIds.delete(id);
+  const tr=document.getElementById('row-'+id); if(tr) tr.classList.toggle('selected',checked);
+  updBulkBar();
+}
+function toggleSelAll(checked){
+  document.querySelectorAll('#orderTable input.chk[data-id]').forEach(cb=>{ cb.checked=checked; toggleSel(parseInt(cb.dataset.id),checked); });
+}
+function clearSel(){ selectedIds=new Set(); renderOrderTable(); }
+function updBulkBar(){
+  const n=selectedIds.size;
+  document.getElementById('bulkCnt').textContent=n;
+  document.getElementById('bulkBar').classList.toggle('show',n>0);
+  const all=document.getElementById('chkAll');
+  if(all){ const boxes=[...document.querySelectorAll('#orderTable input.chk[data-id]')]; all.checked=boxes.length>0&&boxes.every(b=>b.checked); }
+}
+function selList(){ return [...selectedIds].map(id=>orders.find(o=>o.id===id)).filter(Boolean); }
+function bulkConfirm(title, msg, color, onOk){
+  openModal(`
+  <div class="modal-h"><h3>${title}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b">
+    <div style="background:${color==='red'?'var(--stamp-soft)':'var(--primary-soft)'};color:${color==='red'?'var(--stamp)':'var(--primary)'};font-weight:700;padding:12px 14px;border-radius:8px;margin-bottom:14px">${msg}</div>
+    <div style="max-height:200px;overflow:auto;font-size:13px;line-height:1.9">
+      ${selList().map(o=>`· ${o.date} <b>${esc(clientOf(o.clientId)?.name||'-')}</b> — ${esc(o.items[0].name)}${o.items.length>1?` 외 ${o.items.length-1}건`:''}`).join('<br>')}
+    </div>
+  </div>
+  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn ${color==='red'?'btn-primary':'btn-primary'}" style="${color==='red'?'background:var(--stamp)':''}" onclick="closeModal();(${onOk})()">확인</button></div>`);
+}
+async function bulkRun(fn, doneMsg){
+  toast('처리 중...');
+  let ok=0;
+  for(const o of selList()){ try{ await fn(o); ok++; }catch(e){ console.error(e); } }
+  selectedIds=new Set(); renderOrderTable(); renderBell();
+  toast(`${ok}건 ${doneMsg}`);
+}
+function bulkStatus(st){
+  bulkConfirm(st==='완료'?'일괄 완료 처리':'일괄 진행중 변경', `선택한 ${selectedIds.size}건을 <b>${st}</b> 상태로 변경할까요?`, 'blue',
+    `async()=>bulkRun(async o=>{ await dbUpd('orders',o.id,{status:'${st}'}); o.status='${st}'; }, '${st} 처리했습니다')`);
+}
+function bulkPaid(p){
+  bulkConfirm(p?'일괄 입금 완료':'일괄 입금 해제', `선택한 ${selectedIds.size}건을 <b>${p?'입금완료':'입금대기'}</b>로 표시할까요?`, 'blue',
+    `async()=>bulkRun(async o=>{ await dbUpd('orders',o.id,{paid:${p}}); o.paid=${p}; }, '${p?'입금 완료':'입금 해제'} 처리했습니다')`);
+}
+function bulkDelete(){
+  bulkConfirm('일괄 삭제', `선택한 ${selectedIds.size}건을 <b>삭제</b>할까요? 삭제 후에는 복구할 수 없습니다.`, 'red',
+    `async()=>{ toast('삭제 중...'); let ok=0; for(const o of selList()){ try{ await dbDel('orders',o.id); orders=orders.filter(x=>x.id!==o.id); ok++; }catch(e){} } selectedIds=new Set(); renderOrderTable(); renderBell(); toast(ok+'건 삭제했습니다'); }`);
+}
+function bulkAssign(){
+  openModal(`
+  <div class="modal-h"><h3>일괄 담당자 변경</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b">
+    <div class="field"><label>선택한 ${selectedIds.size}건의 담당자를 변경합니다</label>
+      <select id="f_bulkOwner">${users.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select>
+    </div>
+    <div style="font-size:12px;color:var(--muted)">담당자를 바꾸면 매출·정산 집계도 새 담당자 기준으로 옮겨갑니다.</div>
+  </div>
+  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="(async()=>{const uid=parseInt(document.getElementById('f_bulkOwner').value);closeModal();await bulkRun(async o=>{await dbUpd('orders',o.id,{userId:uid});o.userId=uid;},'담당자를 변경했습니다');})()">변경</button></div>`);
 }
 function setOrderTab(t){ orderTab=t; renderOrderTable(); }
 function renderOrderTable(){
@@ -1474,17 +1554,19 @@ function renderOrderTable(){
     <button class="tab ${orderTab===t?'active':''}" onclick="setOrderTab('${t}')">${t}<span class="cnt">${counts[t]}</span></button>`).join('');
 
   let list=orderTab==='전체'?base:base.filter(o=>orderState(o)===orderTab);
-  list=[...list].sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  list=[...list].sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
 
   document.getElementById('orderTable').innerHTML = list.length ? `
   <table class="orders-table"><thead><tr>
-    <th>마감</th><th>상태</th><th>거래처</th><th>품목</th><th class="num">합계(VAT)</th><th class="num">마진</th><th>시작일</th><th>마감일</th><th>담당</th><th style="width:40px"></th>
+    <th style="width:36px"><input type="checkbox" class="chk" id="chkAll" onclick="toggleSelAll(this.checked)" title="전체 선택"></th><th>등록일</th><th>마감</th><th>상태</th><th>거래처</th><th>품목</th><th class="num">합계(VAT)</th><th class="num">마진</th><th>시작일</th><th>마감일</th><th>담당</th><th style="width:40px"></th>
   </tr></thead><tbody>
   ${list.map(o=>{
     const c=clientOf(o.clientId); const total=orderTotal(o); const grand=total+Math.round(total*0.1);
     const margin=orderMargin(o);
     const itemLabel=esc(o.items[0].name)+(o.items.length>1?` 외 ${o.items.length-1}건`:'');
-    return `<tr style="cursor:pointer" onclick="orderDetail(${o.id})">
+    return `<tr id="row-${o.id}" class="${selectedIds.has(o.id)?'selected':''}" style="cursor:pointer" onclick="orderDetail(${o.id})">
+      <td onclick="event.stopPropagation()"><input type="checkbox" class="chk" data-id="${o.id}" ${selectedIds.has(o.id)?'checked':''} onchange="toggleSel(${o.id},this.checked)"></td>
+      <td><b>${o.date}</b></td>
       <td>${dChip(o)}</td>
       <td>${statePill(o)}</td>
       <td><b>${esc(c?.name||'-')}</b></td>
@@ -1507,6 +1589,9 @@ function renderOrderTable(){
       </td></tr>`;
   }).join('')}
   </tbody></table>` : '<div class="empty">조건에 맞는 주문이 없습니다.</div>';
+  const visible=new Set(list.map(o=>o.id));
+  selectedIds=new Set([...selectedIds].filter(id=>visible.has(id)));
+  updBulkBar();
 }
 function toggleActMenu(e,id){
   e.stopPropagation();
