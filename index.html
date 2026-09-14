@@ -1529,6 +1529,8 @@ function orderDetail(id){
       <div><b style="color:var(--muted)">담당자</b> ${esc(userOf(o.userId)?.name||'-')}</div>
       <div><b style="color:var(--muted)">납품기간</b> ${o.startDate} ~ ${o.dueDate}</div>
       <div><b style="color:var(--muted)">상태</b> ${statePill(o)} ${dChip(o)}</div>
+      <div><b style="color:var(--muted)">정산율</b> ${orderRate(o)}%${(o.settleRate!==null&&o.settleRate!==undefined)?' <span style="font-size:11px;color:var(--primary)">(개별 지정)</span>':''}</div>
+      <div><b style="color:var(--muted)">입금</b> ${o.paid?'<span class="status-pill st-done">입금완료</span>':'<span class="status-pill st-wait">입금대기</span>'}</div>
     </div>
     <div class="sec-head"><span class="t sell">🛒 판매 상품</span></div>
     <table style="margin-bottom:14px"><thead><tr><th>품목</th><th>메모</th><th class="num">단가</th><th class="num">수량</th><th class="num">합계</th></tr></thead><tbody>
@@ -1544,6 +1546,7 @@ function orderDetail(id){
       <span>마진 <b class="${margin>=0?'margin-pos':'margin-neg'}">${won(margin)}</b> <span style="font-size:12px;color:var(--muted)">(${supply>0?Math.round(margin/supply*100):0}%)</span></span>
       <span>부가세 <b>${won(vat)}</b></span>
       <span class="grand">합계 <b>${won(supply+vat)}</b></span>
+      <span>정산금 <b style="color:var(--primary)">${won(orderSettle(o))}</b></span>
     </div>
   </div>
   <div class="modal-f">
@@ -2217,21 +2220,21 @@ function settleDetail(userId){
   ${mine.map(o=>{
     const sales=orderTotal(o), cost=orderCost(o), margin=sales-cost;
     const custom=(o.settleRate!==null&&o.settleRate!==undefined);
-    return `<tr>
+    return `<tr style="cursor:pointer" onclick="orderDetail(${o.id})" title="클릭하면 주문 상세를 볼 수 있어요">
     <td>${o.date}</td>
     <td><b>${esc(clientOf(o.clientId)?.name||'-')}</b></td>
-    <td>${esc(o.items[0].name)}${o.items.length>1?` 외 ${o.items.length-1}건`:''}</td>
+    <td><span class="link" style="font-weight:600">${esc(o.items[0].name)}${o.items.length>1?` 외 ${o.items.length-1}건`:''}</span></td>
     <td class="num">${wonS(sales)}</td>
     <td class="num" style="color:var(--amber)">${wonS(cost)}</td>
     <td class="num ${margin>=0?'margin-pos':'margin-neg'}" style="font-weight:700">${wonS(margin)}</td>
-    <td class="num">
+    <td class="num" onclick="event.stopPropagation()">
       ${isAdmin
         ?`<button class="mini-btn ${custom?'blue':''}" onclick="rateOrderForm(${o.id})" title="이 주문만 정산율 변경">${orderRate(o)}%${custom?' ✎':''}</button>`
         :`<span style="font-weight:700${custom?';color:var(--primary)':''}">${orderRate(o)}%${custom?' ✎':''}</span>`}
     </td>
     <td class="num" style="font-weight:800;color:var(--primary)">${wonS(orderSettle(o))}</td>
     <td><span class="status-pill ${o.status==='완료'?'st-done':'st-ing'}">${o.status}</span></td>
-    <td style="text-align:center"><input type="checkbox" style="width:17px;height:17px;cursor:pointer" ${o.paid?'checked':''} onclick="event.preventDefault();confirmPaid(${o.id},${o.paid?'false':'true'})"></td>
+    <td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" style="width:17px;height:17px;cursor:pointer" ${o.paid?'checked':''} onclick="event.preventDefault();confirmPaid(${o.id},${o.paid?'false':'true'})"></td>
   </tr>`;}).join('')}
   </tbody><tfoot><tr style="background:#FBFBF7;font-weight:800">
     <td colspan="7" style="text-align:right">입금 완료 정산금 합계</td>
