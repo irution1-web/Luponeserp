@@ -464,7 +464,7 @@ function dChip(o){
 }
 function myOrders(){ return currentUser.role==='admin' ? orders : orders.filter(o=>o.userId===currentUser.id); }
 function myClients(){ return currentUser.role==='admin' ? clients : clients.filter(c=>c.userId===currentUser.id); }
-function alertOrders(){ return myOrders().filter(o=>o.status==='진행중' && ddays(o.dueDate)<=3).sort((a,b)=>ddays(a.dueDate)-ddays(b.dueDate)); }
+function alertOrders(){ return myOrders().filter(o=>o.status!=='완료' && ddays(o.dueDate)<=3).sort((a,b)=>ddays(a.dueDate)-ddays(b.dueDate)); }
 
 function toast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
@@ -492,6 +492,65 @@ async function doLogin(){
   } finally { btn.disabled=false; btn.textContent='로그인'; }
   enterApp();
   showFeedbackPopup();
+  startDeadlineReminder();
+}
+
+/* ============================================================
+   마감 자동 알림: 첫 로그인 + 오후 2시/5시/6시 재확인 (완료 건 제외)
+============================================================ */
+const REMIND_HOURS=[14,17,18];
+let reminderTimer=null;
+function remindKey(slot){ return `lufons_remind_${currentUser?.id}_${ymd(new Date())}_${slot}`; }
+function remindDone(slot){ try{ return localStorage.getItem(remindKey(slot))==='1'; }catch(e){ return false; } }
+function markRemind(slot){ try{ localStorage.setItem(remindKey(slot),'1'); }catch(e){} }
+function startDeadlineReminder(){
+  if(reminderTimer) clearInterval(reminderTimer);
+  // 1) 그날 첫 로그인 알림
+  if(!remindDone('login')){ markRemind('login'); showDeadlinePopup('오늘의 마감 확인'); }
+  // 2) 오후 2시/5시/6시 재확인 (1분마다 시각 체크)
+  reminderTimer=setInterval(checkReminderSlots, 60*1000);
+  checkReminderSlots();
+}
+function checkReminderSlots(){
+  if(!currentUser) return;
+  const now=new Date(); const h=now.getHours();
+  for(const rh of REMIND_HOURS){
+    if(h>=rh && !remindDone('h'+rh)){
+      markRemind('h'+rh);
+      // 이미 다른 팝업이 열려있으면 닫고 알림 표시
+      showDeadlinePopup(`${rh-12}시 마감 재확인`, true);
+      break;
+    }
+  }
+}
+async function showDeadlinePopup(title, refresh){
+  if(refresh && sb){ try{ await loadAll(); renderBell(); }catch(e){} }
+  const list=alertOrders();
+  if(!list.length) return; // 완료 처리된 건은 제외 → 남은 게 없으면 팝업 없음
+  const isAdmin=currentUser.role==='admin';
+  const over=list.filter(o=>ddays(o.dueDate)<0), soon=list.filter(o=>ddays(o.dueDate)>=0);
+  openModal(`
+  <div class="modal-h"><h3>⏰ ${esc(title)}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b" style="max-height:62vh;overflow:auto">
+    <div style="background:var(--stamp-soft);color:var(--stamp);font-weight:700;padding:12px 14px;border-radius:8px;margin-bottom:14px">
+      ${isAdmin?'전 직원':'담당'} 미완료 주문 중 마감 초과 <b>${over.length}건</b> · 마감 3일 이내 <b>${soon.length}건</b>이 있습니다.
+      <div style="font-size:12px;font-weight:500;margin-top:4px">주문 목록에서 완료 처리하면 다음 알림부터 표시되지 않습니다.</div>
+    </div>
+    <table><thead><tr><th>마감</th><th>거래처</th><th>품목</th>${isAdmin?'<th>담당</th>':''}<th class="num">금액</th><th>마감일</th></tr></thead><tbody>
+    ${list.map(o=>`<tr>
+      <td>${dChip(o)}</td>
+      <td><b>${esc(clientOf(o.clientId)?.name||'-')}</b></td>
+      <td>${esc(o.items[0].name)}${o.items.length>1?` 외 ${o.items.length-1}건`:''}</td>
+      ${isAdmin?`<td>${esc(userOf(o.userId)?.name||'-')}</td>`:''}
+      <td class="num">${wonS(orderTotal(o))}</td>
+      <td>${o.dueDate}</td>
+    </tr>`).join('')}
+    </tbody></table>
+  </div>
+  <div class="modal-f">
+    <button class="btn btn-ghost" onclick="closeModal()">확인</button>
+    <button class="btn btn-primary" onclick="closeModal();go('orders');setTimeout(()=>setOrderTab('기간초과'),50)">주문 목록에서 처리</button>
+  </div>`, true);
 }
 
 /* 로그인 후 화면 진입 */
@@ -521,6 +580,7 @@ async function restoreSession(){
     if(!await loadAll()){ currentUser=null; return; }
     enterApp();
     showFeedbackPopup();
+    startDeadlineReminder();
   }catch(e){ clearSession(); }
 }
 window.addEventListener('DOMContentLoaded',restoreSession);
@@ -567,6 +627,7 @@ async function readPings(){
   await sb.from('notifications').update({read:true}).eq('toUserId',currentUser.id);
 }
 function logout(){
+  if(reminderTimer){ clearInterval(reminderTimer); reminderTimer=null; }
   currentUser=null; clearSession();
   document.getElementById('appView').style.display='none';
   document.getElementById('loginView').style.display='flex';
