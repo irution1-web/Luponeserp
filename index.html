@@ -132,6 +132,24 @@ th.num{text-align:right}
 .status-pill{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
 .st-ing{background:var(--primary-soft);color:var(--primary)}
 .st-done{background:var(--green-soft);color:var(--green)}
+.st-wait{background:var(--paper);color:var(--muted);border:1px solid var(--line)}
+.st-over{background:var(--stamp-soft);color:var(--stamp)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px;flex-wrap:wrap}
+.tab{padding:10px 16px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.tab .cnt{font-size:11px;font-weight:700;background:var(--paper);color:var(--muted);padding:1px 7px;border-radius:10px}
+.tab.active .cnt{background:var(--primary-soft);color:var(--primary)}
+.act-wrap{position:relative;display:inline-block}
+.act-btn{width:30px;height:28px;border:1px solid var(--line);border-radius:6px;background:#fff;font-weight:800;color:var(--muted);letter-spacing:1px}
+.act-btn:hover{background:var(--paper);color:var(--text)}
+.act-menu{display:none;position:absolute;right:0;top:32px;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(23,34,59,.16);z-index:60;min-width:130px;padding:6px;text-align:left}
+.act-menu.open{display:block}
+.act-menu button{display:block;width:100%;text-align:left;padding:8px 12px;border-radius:6px;font-size:13px;font-weight:500;white-space:nowrap}
+.act-menu button:hover{background:var(--paper)}
+.act-menu button.red{color:var(--stamp)}
+.act-menu button.blue{color:var(--primary);font-weight:600}
+.orders-table td,.orders-table th{padding:10px 8px;font-size:13px}
 .empty{padding:40px;text-align:center;color:var(--muted)}
 .link{color:var(--primary);font-weight:600;cursor:pointer;background:none;padding:0}
 .mini-btn{padding:5px 10px;border-radius:6px;border:1px solid var(--line);background:#fff;font-size:12px;font-weight:600}
@@ -379,6 +397,12 @@ async function loadAll(){
     if(res[i].error){ console.error(tables[i],res[i].error); toast('데이터를 불러오지 못했습니다: '+tables[i]); return false; }
   }
   [users,clients,suppliers,supCategories,supProducts,categories,products,orders,notifications,quoteForms,samples,clientProducts]=res.map(r=>r.data||[]);
+  // 공급자(회사) 정보
+  try{
+    const {data:co}=await sb.from('company').select('*').eq('id',1).maybeSingle();
+    if(co) supplier={...supplier, name:co.name||'', bizNo:co.bizNo||'', ceo:co.ceo||'', addr:co.addr||'',
+      phone:co.phone||'', email:co.email||'', bank:co.bank||'', account:co.account||'', holder:co.holder||''};
+  }catch(e){ console.warn('company load', e); }
   return true;
 }
 async function refreshData(){
@@ -386,7 +410,7 @@ async function refreshData(){
   if(await loadAll()){ go(currentPage); toast('최신 데이터로 갱신했습니다'); }
 }
 
-const supplier = {name:'주식회사 루폰스', bizNo:'569-88-02994', ceo:'유재덕', addr:'경기도 파주시 중앙로 291, 4층', phone:'', email:'',
+let supplier = {name:'주식회사 루폰스', bizNo:'569-88-02994', ceo:'유재덕', addr:'경기도 파주시 중앙로 291, 4층', phone:'', email:'',
   bank:'신한은행', account:'140-014-305735', holder:'주식회사 루폰스'};
 
 let currentUser = null;
@@ -407,6 +431,19 @@ const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>'
 function ddays(due){ // 남은 일수: 양수=남음, 0=오늘, 음수=초과
   const d = new Date(due+'T00:00:00');
   return Math.round((d - today)/86400000);
+}
+/* 주문 상태 자동 판정: 완료 / 대기 / 진행중 / 기간초과 */
+function orderState(o){
+  if(o.status==='완료') return '완료';
+  const t=ymd(today);
+  if(o.startDate>t) return '대기';
+  if(o.dueDate<t) return '기간초과';
+  return '진행중';
+}
+function statePill(o){
+  const st=orderState(o);
+  const cls={완료:'st-done',대기:'st-wait',진행중:'st-ing',기간초과:'st-over'}[st];
+  return `<span class="status-pill ${cls}">${st}</span>`;
 }
 function dChip(o){
   if(o.status==='완료') return '<span class="dchip d-done">완료</span>';
@@ -1392,43 +1429,56 @@ async function saveOrder(){
 /* ============================================================
    주문 목록
 ============================================================ */
+let orderTab='전체';
 function renderOrders(){
+  orderTab='전체';
   document.getElementById('content').innerHTML=`
   <div class="toolbar">
     <div class="filters">
-      <select id="fStatus" onchange="renderOrderTable()" style="width:130px">
-        <option value="">전체 상태</option><option>진행중</option><option>완료</option>
+      <select id="fBasis" onchange="renderOrderTable()" style="width:110px">
+        <option value="date">주문일</option><option value="startDate">시작일</option><option value="dueDate">마감일</option>
       </select>
-      <select id="fClient" onchange="renderOrderTable()" style="width:170px">
+      <input type="date" id="fFrom" onchange="renderOrderTable()" style="width:140px">
+      <span style="color:var(--muted);align-self:center">~</span>
+      <input type="date" id="fTo" onchange="renderOrderTable()" style="width:140px">
+      <button class="mini-btn" onclick="document.getElementById('fFrom').value='';document.getElementById('fTo').value='';renderOrderTable()">기간 초기화</button>
+      <select id="fClient" onchange="renderOrderTable()" style="width:160px">
         <option value="">전체 거래처</option>${myClients().map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('')}
       </select>
-      ${currentUser.role==='admin'?`<select id="fStaff" onchange="renderOrderTable()" style="width:140px">
+      ${currentUser.role==='admin'?`<select id="fStaff" onchange="renderOrderTable()" style="width:120px">
         <option value="">전체 직원</option>${users.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}
       </select>`:''}
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer">
-        <input type="checkbox" id="fUrgent" onchange="renderOrderTable()" style="width:auto"> 마감임박만
-      </label>
     </div>
     <button class="btn btn-primary" onclick="go('orderNew')">+ 주문 등록</button>
   </div>
+  <div class="tabs" id="orderTabs"></div>
   <div class="card"><div class="card-b flush" id="orderTable"></div></div>`;
   renderOrderTable();
 }
+function setOrderTab(t){ orderTab=t; renderOrderTable(); }
 function renderOrderTable(){
-  const st=document.getElementById('fStatus').value;
+  const basis=document.getElementById('fBasis').value;
+  const from=document.getElementById('fFrom').value, to=document.getElementById('fTo').value;
   const cl=parseInt(document.getElementById('fClient').value)||0;
   const sf=parseInt(document.getElementById('fStaff')?.value)||0;
-  const urgent=document.getElementById('fUrgent').checked;
-  let list=myOrders();
-  if(st) list=list.filter(o=>o.status===st);
-  if(cl) list=list.filter(o=>o.clientId===cl);
-  if(sf) list=list.filter(o=>o.userId===sf);
-  if(urgent) list=list.filter(o=>o.status==='진행중'&&ddays(o.dueDate)<=3);
+  let base=myOrders();
+  if(from) base=base.filter(o=>o[basis]>=from);
+  if(to)   base=base.filter(o=>o[basis]<=to);
+  if(cl) base=base.filter(o=>o.clientId===cl);
+  if(sf) base=base.filter(o=>o.userId===sf);
+
+  const tabs=['전체','대기','진행중','기간초과','완료'];
+  const counts={전체:base.length};
+  tabs.slice(1).forEach(t=>counts[t]=base.filter(o=>orderState(o)===t).length);
+  document.getElementById('orderTabs').innerHTML=tabs.map(t=>`
+    <button class="tab ${orderTab===t?'active':''}" onclick="setOrderTab('${t}')">${t}<span class="cnt">${counts[t]}</span></button>`).join('');
+
+  let list=orderTab==='전체'?base:base.filter(o=>orderState(o)===orderTab);
   list=[...list].sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
 
   document.getElementById('orderTable').innerHTML = list.length ? `
-  <table><thead><tr>
-    <th>마감</th><th>거래처</th><th>품목</th><th class="num">합계(VAT포함)</th><th class="num">마진</th><th>시작일</th><th>마감일</th><th>담당</th><th>상태</th><th style="width:300px"></th>
+  <table class="orders-table"><thead><tr>
+    <th>마감</th><th>상태</th><th>거래처</th><th>품목</th><th class="num">합계(VAT)</th><th class="num">마진</th><th>시작일</th><th>마감일</th><th>담당</th><th style="width:40px"></th>
   </tr></thead><tbody>
   ${list.map(o=>{
     const c=clientOf(o.clientId); const total=orderTotal(o); const grand=total+Math.round(total*0.1);
@@ -1436,23 +1486,35 @@ function renderOrderTable(){
     const itemLabel=esc(o.items[0].name)+(o.items.length>1?` 외 ${o.items.length-1}건`:'');
     return `<tr style="cursor:pointer" onclick="orderDetail(${o.id})">
       <td>${dChip(o)}</td>
+      <td>${statePill(o)}</td>
       <td><b>${esc(c?.name||'-')}</b></td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.items.map(i=>i.name).join(', '))}">${itemLabel}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.items.map(i=>i.name).join(', '))}">${itemLabel}</td>
       <td class="num"><b>${wonS(grand)}</b></td>
       <td class="num ${margin>=0?'margin-pos':'margin-neg'}" style="font-weight:700">${wonS(margin)}<span style="font-size:11px;color:var(--muted);font-weight:500"> (${total>0?Math.round(margin/total*100):0}%)</span></td>
       <td>${o.startDate}</td><td>${o.dueDate}</td>
       <td>${esc(userOf(o.userId)?.name||'-')}</td>
-      <td><span class="status-pill ${o.status==='완료'?'st-done':'st-ing'}">${o.status}</span></td>
-      <td style="text-align:right;white-space:nowrap">
-        <button class="mini-btn" onclick="event.stopPropagation();orderDetail(${o.id})">상세</button>
-        <button class="mini-btn blue" onclick="event.stopPropagation();go('orderEdit',${o.id})">수정</button>
-        <button class="mini-btn blue" onclick="event.stopPropagation();go('quote',${o.id})">견적서</button>
-        <button class="mini-btn" onclick="event.stopPropagation();toggleStatus(${o.id})">${o.status==='완료'?'진행중으로':'완료'}</button>
-        <button class="mini-btn red" onclick="event.stopPropagation();delOrder(${o.id})">삭제</button>
+      <td onclick="event.stopPropagation()">
+        <div class="act-wrap">
+          <button class="act-btn" onclick="toggleActMenu(event,${o.id})">⋯</button>
+          <div class="act-menu" id="act-${o.id}">
+            <button onclick="closeActMenus();orderDetail(${o.id})">상세 보기</button>
+            <button class="blue" onclick="closeActMenus();go('orderEdit',${o.id})">주문 수정</button>
+            <button class="blue" onclick="closeActMenus();go('quote',${o.id})">견적서</button>
+            <button onclick="closeActMenus();toggleStatus(${o.id})">${o.status==='완료'?'진행중으로 변경':'완료 처리'}</button>
+            <button class="red" onclick="closeActMenus();delOrder(${o.id})">삭제</button>
+          </div>
+        </div>
       </td></tr>`;
   }).join('')}
   </tbody></table>` : '<div class="empty">조건에 맞는 주문이 없습니다.</div>';
 }
+function toggleActMenu(e,id){
+  e.stopPropagation();
+  const m=document.getElementById('act-'+id); const wasOpen=m.classList.contains('open');
+  closeActMenus(); if(!wasOpen) m.classList.add('open');
+}
+function closeActMenus(){ document.querySelectorAll('.act-menu.open').forEach(m=>m.classList.remove('open')); }
+document.addEventListener('click',()=>closeActMenus());
 /* 주문 상세 보기 */
 function orderDetail(id){
   const o=orders.find(x=>x.id===id);
@@ -1466,7 +1528,7 @@ function orderDetail(id){
       <div><b style="color:var(--muted)">등록일</b> ${o.date}</div>
       <div><b style="color:var(--muted)">담당자</b> ${esc(userOf(o.userId)?.name||'-')}</div>
       <div><b style="color:var(--muted)">납품기간</b> ${o.startDate} ~ ${o.dueDate}</div>
-      <div><b style="color:var(--muted)">상태</b> <span class="status-pill ${o.status==='완료'?'st-done':'st-ing'}">${o.status}</span> ${dChip(o)}</div>
+      <div><b style="color:var(--muted)">상태</b> ${statePill(o)} ${dChip(o)}</div>
     </div>
     <div class="sec-head"><span class="t sell">🛒 판매 상품</span></div>
     <table style="margin-bottom:14px"><thead><tr><th>품목</th><th>메모</th><th class="num">단가</th><th class="num">수량</th><th class="num">합계</th></tr></thead><tbody>
@@ -1836,6 +1898,20 @@ function renderForms(){
     <div style="color:var(--muted);font-size:13px">견적서 하단에 표시될 안내 문구를 양식으로 저장합니다. 주문 등록 시 양식을 선택하면 해당 문구가 적용됩니다.</div>
     <button class="btn btn-primary" onclick="formForm()">+ 양식 추가</button>
   </div>
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><h3>🏢 공급자(회사) 정보</h3><button class="btn btn-ghost" onclick="companyForm()">정보 수정</button></div>
+    <div class="card-b">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;font-size:13px">
+        <div><b style="color:var(--muted);font-size:12px;display:block;margin-bottom:2px">상호명</b>${esc(supplier.name)||'<span style="color:var(--muted)">미등록</span>'}</div>
+        <div><b style="color:var(--muted);font-size:12px;display:block;margin-bottom:2px">사업자등록번호</b>${esc(supplier.bizNo)||'<span style="color:var(--muted)">미등록</span>'}</div>
+        <div><b style="color:var(--muted);font-size:12px;display:block;margin-bottom:2px">대표자</b>${esc(supplier.ceo)||'<span style="color:var(--muted)">미등록</span>'}</div>
+        <div><b style="color:var(--muted);font-size:12px;display:block;margin-bottom:2px">주소</b>${esc(supplier.addr)||'<span style="color:var(--muted)">미등록</span>'}</div>
+        <div><b style="color:var(--muted);font-size:12px;display:block;margin-bottom:2px">연락처</b>${esc(supplier.phone)||'<span style="color:var(--muted)">미등록</span>'}</div>
+        <div><b style="color:var(--muted);font-size:12px;display:block;margin-bottom:2px">입금 계좌</b>${esc(supplier.bank)} ${esc(supplier.account)}${supplier.holder?' ('+esc(supplier.holder)+')':''}</div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:14px">이 정보는 모든 견적서의 공급자 표와 입금 계좌 안내에 표시됩니다.</div>
+    </div>
+  </div>
   <div class="card"><div class="card-b flush">
   ${quoteForms.length ? `<table><thead><tr><th style="width:150px">양식명</th><th>안내 문구</th><th style="width:80px">기본</th><th style="width:180px"></th></tr></thead><tbody>
   ${quoteForms.map(f=>`<tr>
@@ -1849,6 +1925,45 @@ function renderForms(){
   </tr>`).join('')}
   </tbody></table>` : '<div class="empty">등록된 양식이 없습니다. [+ 양식 추가]로 만들어보세요.<br><span style="font-size:12px">양식이 없으면 견적서에 기본 문구가 표시됩니다.</span></div>'}
   </div></div>`;
+}
+function companyForm(){
+  if(currentUser.role!=='admin'){ toast('회사 정보 수정은 슈퍼어드민만 가능합니다'); return; }
+  const c=supplier;
+  openModal(`
+  <div class="modal-h"><h3>공급자(회사) 정보 수정</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b" style="max-height:62vh;overflow:auto">
+    <div class="field"><label>상호명 <span class="req">*</span></label><input id="co_name" value="${esc(c.name)}"></div>
+    <div class="field-row">
+      <div class="field"><label>사업자등록번호</label><input id="co_biz" value="${esc(c.bizNo)}" placeholder="000-00-00000"></div>
+      <div class="field"><label>대표자</label><input id="co_ceo" value="${esc(c.ceo)}"></div>
+    </div>
+    <div class="field"><label>주소</label><input id="co_addr" value="${esc(c.addr)}"></div>
+    <div class="field-row">
+      <div class="field"><label>연락처</label><input id="co_phone" value="${esc(c.phone)}" placeholder="031-000-0000"></div>
+      <div class="field"><label>이메일</label><input id="co_email" value="${esc(c.email)}"></div>
+    </div>
+    <div class="sec-head" style="margin-top:6px"><span class="t sell">입금 계좌</span></div>
+    <div class="field-row" style="grid-template-columns:.8fr 1.4fr">
+      <div class="field"><label>은행명</label><input id="co_bank" value="${esc(c.bank)}" placeholder="신한은행"></div>
+      <div class="field"><label>계좌번호</label><input id="co_acct" value="${esc(c.account)}" placeholder="000-000-000000"></div>
+    </div>
+    <div class="field"><label>예금주</label><input id="co_holder" value="${esc(c.holder)}"></div>
+    <div style="font-size:12px;color:var(--muted)">연락처·이메일을 비워두면 견적서에 공란으로 표시됩니다.</div>
+  </div>
+  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveCompany()">저장</button></div>`);
+}
+async function saveCompany(){
+  const g=id=>document.getElementById(id).value.trim();
+  const name=g('co_name');
+  if(!name){ toast('상호명을 입력하세요'); return; }
+  const data={name, bizNo:g('co_biz'), ceo:g('co_ceo'), addr:g('co_addr'), phone:g('co_phone'),
+    email:g('co_email'), bank:g('co_bank'), account:g('co_acct'), holder:g('co_holder')};
+  try{
+    const {error}=await sb.from('company').upsert({id:1, ...data});
+    if(error) throw error;
+  }catch(e){ console.error(e); toast('저장 실패: '+(e.message||'서버 오류')); return; }
+  supplier={...supplier, ...data};
+  closeModal(); renderForms(); toast('회사 정보를 저장했습니다');
 }
 function formForm(id){
   const f=id?quoteForms.find(x=>x.id===id):{name:'',note:DEFAULT_NOTE,isDefault:quoteForms.length===0};
@@ -1905,16 +2020,17 @@ function renderErpUI(){
   document.getElementById('content').innerHTML=`
   <div class="toolbar">
     <div class="filters">
-      <select id="erpRange" onchange="onErpRange()" style="width:150px">
-        <option value="7d">최근 7일</option>
-        <option value="14d">최근 14일</option>
-        <option value="1m">최근 1개월</option>
-        <option value="3">최근 3개월</option>
-        <option value="6" selected>최근 6개월</option>
-        <option value="12">최근 12개월</option>
-        <option value="month">월 지정 조회</option>
+      <select id="erpBasis" onchange="drawErp()" style="width:110px" title="집계 기준일">
+        <option value="date">주문일</option><option value="startDate">시작일</option><option value="dueDate">마감일</option>
       </select>
-      <input type="month" id="erpMonth" value="${ymd(today).slice(0,7)}" onchange="drawErp()" style="width:150px;display:none">
+      <select id="erpRange" onchange="onErpRange()" style="width:120px">
+        <option value="month" selected>월별 조회</option>
+        <option value="range">기간 지정</option>
+      </select>
+      <input type="month" id="erpMonth" value="${ymd(today).slice(0,7)}" onchange="drawErp()" style="width:150px">
+      <input type="date" id="erpFrom" value="${ymd(today).slice(0,8)+'01'}" onchange="drawErp()" style="width:140px;display:none">
+      <span id="erpTilde" style="color:var(--muted);align-self:center;display:none">~</span>
+      <input type="date" id="erpTo" value="${ymd(today)}" onchange="drawErp()" style="width:140px;display:none">
       <select id="erpStatus" onchange="drawErp()" style="width:150px">
         <option value="">전체 주문</option><option value="완료">완료 주문만</option><option value="진행중">진행중만</option>
       </select>
@@ -1944,37 +2060,42 @@ function renderErpUI(){
 function onErpRange(){
   const v=document.getElementById('erpRange').value;
   document.getElementById('erpMonth').style.display = v==='month' ? '' : 'none';
+  ['erpFrom','erpTilde','erpTo'].forEach(id=>document.getElementById(id).style.display = v==='range' ? '' : 'none');
   drawErp();
 }
+function erpBasis(){ return document.getElementById('erpBasis')?.value||'date'; }
 function erpFiltered(){
   const v=document.getElementById('erpRange').value;
   const st=document.getElementById('erpStatus').value;
-  let fromStr, toStr=ymd(today), chartKeys=[], chartMode='month';
+  const basis=erpBasis();
+  let fromStr, toStr, chartKeys=[], chartMode='day';
 
-  if(v==='7d'||v==='14d'||v==='1m'){
-    const days = v==='7d'?7 : v==='14d'?14 : 30;
-    fromStr=dstr(-(days-1));
-    chartMode='day';
-    for(let i=days-1;i>=0;i--) chartKeys.push(dstr(-i));
-  }else if(v==='month'){
+  if(v==='month'){
     const mo=document.getElementById('erpMonth').value || ymd(today).slice(0,7);
     fromStr=mo+'-01';
-    const last=new Date(parseInt(mo.slice(0,4)), parseInt(mo.slice(5,7)), 0); // 해당 월 말일
+    const last=new Date(parseInt(mo.slice(0,4)), parseInt(mo.slice(5,7)), 0);
     toStr=ymd(last);
-    chartMode='day';
     for(let d=1;d<=last.getDate();d++) chartKeys.push(mo+'-'+String(d).padStart(2,'0'));
   }else{
-    const months=parseInt(v);
-    const from=new Date(today); from.setMonth(from.getMonth()-months+1); from.setDate(1);
-    fromStr=ymd(from);
-    for(let i=months-1;i>=0;i--){ const d=new Date(today); d.setDate(1); d.setMonth(d.getMonth()-i); chartKeys.push(ymd(d).slice(0,7)); }
+    fromStr=document.getElementById('erpFrom').value||ymd(today).slice(0,8)+'01';
+    toStr=document.getElementById('erpTo').value||ymd(today);
+    if(toStr<fromStr){ const t=fromStr; fromStr=toStr; toStr=t; }
+    const span=Math.round((new Date(toStr+'T00:00:00')-new Date(fromStr+'T00:00:00'))/86400000)+1;
+    if(span<=62){
+      for(let i=0;i<span;i++){ const d=new Date(fromStr+'T00:00:00'); d.setDate(d.getDate()+i); chartKeys.push(ymd(d)); }
+    }else{
+      chartMode='month';
+      let d=new Date(fromStr.slice(0,7)+'-01T00:00:00');
+      const end=toStr.slice(0,7);
+      while(ymd(d).slice(0,7)<=end){ chartKeys.push(ymd(d).slice(0,7)); d.setMonth(d.getMonth()+1); }
+    }
   }
-  let list=myOrders().filter(o=>o.date>=fromStr && o.date<=toStr);
+  let list=myOrders().filter(o=>(o[basis]||o.date)>=fromStr && (o[basis]||o.date)<=toStr);
   if(st) list=list.filter(o=>o.status===st);
-  return {list, chartKeys, chartMode};
+  return {list, chartKeys, chartMode, basis};
 }
 function drawErp(){
-  const {list, chartKeys, chartMode}=erpFiltered();
+  const {list, chartKeys, chartMode, basis}=erpFiltered();
   const total=list.reduce((s,o)=>s+orderTotal(o),0);
   const avg=list.length?Math.round(total/list.length):0;
   const clientIds=[...new Set(list.map(o=>o.clientId))];
@@ -1987,8 +2108,8 @@ function drawErp(){
 
   /* 매출 추이 차트 (일별/월별 자동) */
   const byKey=chartKeys.map(k=> chartMode==='day'
-    ? list.filter(o=>o.date===k).reduce((s,o)=>s+orderTotal(o),0)
-    : list.filter(o=>o.date.startsWith(k)).reduce((s,o)=>s+orderTotal(o),0));
+    ? list.filter(o=>(o[basis]||o.date)===k).reduce((s,o)=>s+orderTotal(o),0)
+    : list.filter(o=>(o[basis]||o.date).startsWith(k)).reduce((s,o)=>s+orderTotal(o),0));
   const max=Math.max(...byKey,1);
   const labelStep = chartKeys.length>16 ? 5 : 1; // 막대가 많으면 라벨 간격 조정
   document.getElementById('erpChartTitle').textContent = chartMode==='day' ? '일별 매출 추이' : '월별 매출 추이';
@@ -2036,7 +2157,7 @@ function drawMonthlySettle(){
   const rows=staff.map(u=>{
     const mine=orders.filter(o=>o.userId===u.id && (!st||o.status===st));
     const vals=months.map(m=>{
-      const mo=mine.filter(o=>o.date.startsWith(m));
+      const b=erpBasis(); const mo=mine.filter(o=>(o[b]||o.date).startsWith(m));
       const margin=mo.reduce((sum,o)=>sum+orderMargin(o),0);
       return settleAmt(margin,u.rate);
     });
@@ -2165,6 +2286,9 @@ function excelForm(){
   openModal(`
   <div class="modal-h"><h3>📥 엑셀 다운로드</h3><button class="modal-x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
+    <div class="field"><label>집계 기준</label>
+      <select id="xl_basis"><option value="date">주문일</option><option value="startDate">시작일</option><option value="dueDate">마감일</option></select>
+    </div>
     <div class="field-row">
       <div class="field"><label>시작일 <span class="req">*</span></label><input type="date" id="xl_from" value="${first}"></div>
       <div class="field"><label>종료일 <span class="req">*</span></label><input type="date" id="xl_to" value="${ymd(today)}"></div>
@@ -2195,7 +2319,8 @@ function exportExcel(){
   if(!from||!to){ toast('기간을 선택하세요'); return; }
   if(to<from){ toast('종료일은 시작일 이후여야 합니다'); return; }
   if(typeof XLSX==='undefined'){ toast('엑셀 기능을 불러오지 못했습니다. 인터넷 연결을 확인하세요'); return; }
-  let list=myOrders().filter(o=>o.date>=from&&o.date<=to);
+  const xb=document.getElementById('xl_basis').value||'date';
+  let list=myOrders().filter(o=>(o[xb]||o.date)>=from&&(o[xb]||o.date)<=to);
   if(st) list=list.filter(o=>o.status===st);
   if(staffId) list=list.filter(o=>o.userId===staffId);
   if(!list.length){ toast('해당 기간에 주문이 없습니다'); return; }
