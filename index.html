@@ -2158,8 +2158,7 @@ function drawMonthlySettle(){
     const mine=orders.filter(o=>o.userId===u.id && (!st||o.status===st));
     const vals=months.map(m=>{
       const b=erpBasis(); const mo=mine.filter(o=>(o[b]||o.date).startsWith(m));
-      const margin=mo.reduce((sum,o)=>sum+orderMargin(o),0);
-      return settleAmt(margin,u.rate);
+      return mo.reduce((sum,o)=>sum+orderSettle(o),0);
     });
     return {u, vals, total:vals.reduce((a,b)=>a+b,0)};
   }).filter(r=>isAdmin?true:true);
@@ -2176,6 +2175,9 @@ function drawMonthlySettle(){
 
 /* ---- 직원별 정산 관리 ---- */
 const settleAmt = (margin, rate) => Math.round(margin * (rate||0) / 100);
+/* 주문별 정산율: 개별 지정(o.settleRate)이 있으면 우선, 없으면 담당자 기본 정산율 */
+const orderRate   = o => (o.settleRate!==null && o.settleRate!==undefined) ? o.settleRate : (userOf(o.userId)?.rate||0);
+const orderSettle = o => settleAmt(orderMargin(o), orderRate(o));
 function drawSettle(list){
   const isAdmin=currentUser.role==='admin';
   const staff=(isAdmin?users:[currentUser]).map(u=>{
@@ -2183,7 +2185,7 @@ function drawSettle(list){
     const sales=mine.reduce((s,o)=>s+orderTotal(o),0);
     const cost=mine.reduce((s,o)=>s+orderCost(o),0);
     const margin=sales-cost;
-    return {u, count:mine.length, sales, cost, margin, settle:settleAmt(margin,u.rate)};
+    return {u, count:mine.length, sales, cost, margin, settle:mine.reduce((sum,o)=>sum+orderSettle(o),0)};
   }).sort((a,b)=>b.settle-a.settle);
 
   document.getElementById('erpSettle').innerHTML = staff.some(r=>r.count) ? `
@@ -2208,11 +2210,13 @@ function settleDetail(userId){
   const {list}=erpFiltered();
   const u=userOf(userId);
   const mine=list.filter(o=>o.userId===userId).sort((a,b)=>b.date.localeCompare(a.date));
-  document.getElementById('settleDetailTitle').textContent=`정산 상세 내역 · ${u?.name||''} (정산율 ${u?.rate||0}%)`;
+  document.getElementById('settleDetailTitle').textContent=`정산 상세 내역 · ${u?.name||''} (기본 정산율 ${u?.rate||0}%)`;
+  const isAdmin=currentUser.role==='admin';
   document.getElementById('settleDetail').innerHTML = mine.length ? `
-  <table><thead><tr><th>등록일</th><th>거래처</th><th>품목</th><th class="num">매출</th><th class="num">원가</th><th class="num">마진</th><th class="num">정산금</th><th>상태</th><th style="text-align:center;width:70px">입금</th></tr></thead><tbody>
+  <table><thead><tr><th>등록일</th><th>거래처</th><th>품목</th><th class="num">매출</th><th class="num">원가</th><th class="num">마진</th><th class="num">정산율</th><th class="num">정산금</th><th>상태</th><th style="text-align:center;width:70px">입금</th></tr></thead><tbody>
   ${mine.map(o=>{
     const sales=orderTotal(o), cost=orderCost(o), margin=sales-cost;
+    const custom=(o.settleRate!==null&&o.settleRate!==undefined);
     return `<tr>
     <td>${o.date}</td>
     <td><b>${esc(clientOf(o.clientId)?.name||'-')}</b></td>
@@ -2220,13 +2224,18 @@ function settleDetail(userId){
     <td class="num">${wonS(sales)}</td>
     <td class="num" style="color:var(--amber)">${wonS(cost)}</td>
     <td class="num ${margin>=0?'margin-pos':'margin-neg'}" style="font-weight:700">${wonS(margin)}</td>
-    <td class="num" style="font-weight:800;color:var(--primary)">${wonS(settleAmt(margin,u?.rate))}</td>
+    <td class="num">
+      ${isAdmin
+        ?`<button class="mini-btn ${custom?'blue':''}" onclick="rateOrderForm(${o.id})" title="이 주문만 정산율 변경">${orderRate(o)}%${custom?' ✎':''}</button>`
+        :`<span style="font-weight:700${custom?';color:var(--primary)':''}">${orderRate(o)}%${custom?' ✎':''}</span>`}
+    </td>
+    <td class="num" style="font-weight:800;color:var(--primary)">${wonS(orderSettle(o))}</td>
     <td><span class="status-pill ${o.status==='완료'?'st-done':'st-ing'}">${o.status}</span></td>
     <td style="text-align:center"><input type="checkbox" style="width:17px;height:17px;cursor:pointer" ${o.paid?'checked':''} onclick="event.preventDefault();confirmPaid(${o.id},${o.paid?'false':'true'})"></td>
   </tr>`;}).join('')}
   </tbody><tfoot><tr style="background:#FBFBF7;font-weight:800">
-    <td colspan="6" style="text-align:right">입금 완료 정산금 합계</td>
-    <td class="num" style="color:var(--green)">${wonS(mine.filter(o=>o.paid).reduce((sum,o)=>sum+settleAmt(orderMargin(o),u?.rate),0))}</td>
+    <td colspan="7" style="text-align:right">입금 완료 정산금 합계</td>
+    <td class="num" style="color:var(--green)">${wonS(mine.filter(o=>o.paid).reduce((sum,o)=>sum+orderSettle(o),0))}</td>
     <td colspan="2" style="font-weight:600;color:var(--muted);font-size:12px">${mine.filter(o=>o.paid).length} / ${mine.length}건</td>
   </tr></tfoot></table>` : '<div class="empty">기간 내 주문이 없습니다.</div>';
 
@@ -2235,7 +2244,7 @@ function settleDetail(userId){
 function confirmPaid(id, checked){
   const o=orders.find(x=>x.id===id); if(!o) return;
   const u=userOf(o.userId);
-  const amt=settleAmt(orderMargin(o), u?.rate);
+  const amt=orderSettle(o);
   openModal(`
   <div class="modal-h"><h3>${checked?'입금 완료 처리':'입금 표시 해제'}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
   <div class="modal-b">
@@ -2245,7 +2254,7 @@ function confirmPaid(id, checked){
     <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px">
       <b style="color:var(--muted)">거래처</b><span>${esc(clientOf(o.clientId)?.name||'-')}</span>
       <b style="color:var(--muted)">품목</b><span>${esc(o.items[0].name)}${o.items.length>1?` 외 ${o.items.length-1}건`:''}</span>
-      <b style="color:var(--muted)">담당자</b><span>${esc(u?.name||'-')} (정산율 ${u?.rate||0}%)</span>
+      <b style="color:var(--muted)">담당자</b><span>${esc(u?.name||'-')} (정산율 ${orderRate(o)}%)</span>
       <b style="color:var(--muted)">정산금</b><span style="font-weight:800;color:var(--primary);font-size:15px">${won(amt)}</span>
     </div>
   </div>
@@ -2253,6 +2262,40 @@ function confirmPaid(id, checked){
     <button class="btn btn-ghost" onclick="closeModal()">취소</button>
     <button class="btn btn-primary" onclick="closeModal();togglePaid(${id},${checked})">${checked?'입금 완료':'해제'}</button>
   </div>`);
+}
+/* 주문별 정산율 개별 지정 (슈퍼어드민) */
+function rateOrderForm(id){
+  if(currentUser.role!=='admin'){ toast('정산율 변경은 슈퍼어드민만 가능합니다'); return; }
+  const o=orders.find(x=>x.id===id); if(!o) return;
+  const u=userOf(o.userId);
+  const custom=(o.settleRate!==null&&o.settleRate!==undefined);
+  openModal(`
+  <div class="modal-h"><h3>이 주문의 정산율 설정</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b">
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:13px;margin-bottom:16px">
+      <b style="color:var(--muted)">거래처</b><span>${esc(clientOf(o.clientId)?.name||'-')}</span>
+      <b style="color:var(--muted)">품목</b><span>${esc(o.items[0].name)}${o.items.length>1?` 외 ${o.items.length-1}건`:''}</span>
+      <b style="color:var(--muted)">담당자</b><span>${esc(u?.name||'-')} (기본 정산율 ${u?.rate||0}%)</span>
+      <b style="color:var(--muted)">마진</b><span style="font-weight:700">${won(orderMargin(o))}</span>
+    </div>
+    <div class="field"><label>이 주문에 적용할 정산율 (%)</label>
+      <input id="f_orate" type="number" min="0" max="100" value="${custom?o.settleRate:(u?.rate||0)}" oninput="document.getElementById('oratePreview').textContent=won(settleAmt(${orderMargin(o)},parseInt(this.value)||0))">
+    </div>
+    <div style="font-size:13px;margin-top:-6px">예상 정산금: <b id="oratePreview" style="color:var(--primary)">${won(orderSettle(o))}</b></div>
+    ${custom?`<div style="margin-top:12px"><button class="mini-btn" onclick="saveOrderRate(${id},null)">기본 정산율(${u?.rate||0}%)로 되돌리기</button></div>`:''}
+  </div>
+  <div class="modal-f"><button class="btn btn-ghost" onclick="closeModal()">취소</button><button class="btn btn-primary" onclick="saveOrderRate(${id})">저장</button></div>`);
+}
+async function saveOrderRate(id, reset){
+  let rate=null;
+  if(reset!==null){
+    rate=parseInt(document.getElementById('f_orate').value);
+    if(isNaN(rate)||rate<0||rate>100){ toast('0~100 사이의 정산율을 입력하세요'); return; }
+  }
+  try{ await dbUpd('orders',id,{settleRate:rate}); }catch(e){ return; }
+  const o=orders.find(x=>x.id===id); if(o) o.settleRate=rate;
+  closeModal(); drawErp();
+  toast(rate===null?'기본 정산율로 되돌렸습니다':'이 주문의 정산율을 '+rate+'%로 설정했습니다');
 }
 async function togglePaid(id, checked){
   try{ await dbUpd('orders',id,{paid:checked}); }catch(e){ drawErp(); return; }
@@ -2327,20 +2370,20 @@ function exportExcel(){
   list=[...list].sort((a,b)=>a.date.localeCompare(b.date));
 
   /* 시트1: 주문 내역 (정산금 = 해당 주문 마진 × 담당자 정산율) */
-  const rows1=[['등록일','거래처','담당자','품목','시작일','마감일','공급가','원가','부가세','합계','정산금','입금여부']];
+  const rows1=[['등록일','거래처','담당자','품목','시작일','마감일','공급가','원가','부가세','합계','정산율(%)','정산금','입금여부']];
   list.forEach(o=>{
     const u=userOf(o.userId);
     const sales=orderTotal(o), cost=orderCost(o), margin=sales-cost, vat=Math.round(sales*0.1);
     rows1.push([o.date, clientOf(o.clientId)?.name||'-', u?.name||'-',
       o.items.map(i=>`${i.name} x${i.qty}`).join(', '),
-      o.startDate, o.dueDate, sales, cost, vat, sales+vat, settleAmt(margin, u?.rate),
+      o.startDate, o.dueDate, sales, cost, vat, sales+vat, orderRate(o), orderSettle(o),
       o.paid?'입금완료':'입금대기']);
   });
   const tSales=list.reduce((s,o)=>s+orderTotal(o),0), tCost=list.reduce((s,o)=>s+orderCost(o),0);
-  const tSettle=list.reduce((s,o)=>s+settleAmt(orderMargin(o), userOf(o.userId)?.rate),0);
+  const tSettle=list.reduce((s,o)=>s+orderSettle(o),0);
   const paidCnt=list.filter(o=>o.paid).length;
   rows1.push([]);
-  rows1.push(['합계','','','','','',tSales,tCost,Math.round(tSales*0.1),tSales+Math.round(tSales*0.1),tSettle,`입금완료 ${paidCnt}/${list.length}건`]);
+  rows1.push(['합계','','','','','',tSales,tCost,Math.round(tSales*0.1),tSales+Math.round(tSales*0.1),'',tSettle,`입금완료 ${paidCnt}/${list.length}건`]);
 
   /* 시트2: 직원별 정산 */
   const staffIds=[...new Set(list.map(o=>o.userId))];
@@ -2352,13 +2395,14 @@ function exportExcel(){
     const cost=mine.reduce((s,o)=>s+orderCost(o),0);
     return {u, count:mine.length, sales, cost, margin:sales-cost};
   }).sort((a,b)=>b.margin-a.margin).forEach(r=>{
-    const paidSettle=list.filter(o=>o.userId===r.u?.id&&o.paid).reduce((sum,o)=>sum+settleAmt(orderMargin(o), r.u?.rate),0);
-    rows2.push([r.u?.name||'-', r.u?.rate||0, r.count, r.sales, r.cost, settleAmt(r.margin, r.u?.rate), paidSettle]);
+    const mineX=list.filter(o=>o.userId===r.u?.id);
+    const paidSettle=mineX.filter(o=>o.paid).reduce((sum,o)=>sum+orderSettle(o),0);
+    rows2.push([r.u?.name||'-', r.u?.rate||0, r.count, r.sales, r.cost, mineX.reduce((sum,o)=>sum+orderSettle(o),0), paidSettle]);
   });
 
   const wb=XLSX.utils.book_new();
   const ws1=XLSX.utils.aoa_to_sheet(rows1);
-  ws1['!cols']=[{wch:11},{wch:16},{wch:9},{wch:38},{wch:11},{wch:11},{wch:13},{wch:12},{wch:12},{wch:14},{wch:12},{wch:11}];
+  ws1['!cols']=[{wch:11},{wch:16},{wch:9},{wch:38},{wch:11},{wch:11},{wch:13},{wch:12},{wch:12},{wch:14},{wch:10},{wch:12},{wch:11}];
   const ws2=XLSX.utils.aoa_to_sheet(rows2);
   ws2['!cols']=[{wch:10},{wch:10},{wch:10},{wch:13},{wch:12},{wch:12},{wch:15}];
   XLSX.utils.book_append_sheet(wb, ws1, '주문내역');
