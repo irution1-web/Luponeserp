@@ -1723,7 +1723,8 @@ function orderDetail(id){
       <span>마진 <b class="${margin>=0?'margin-pos':'margin-neg'}">${won(margin)}</b> <span style="font-size:12px;color:var(--muted)">(${supply>0?Math.round(margin/supply*100):0}%)</span></span>
       <span>부가세 <b>${won(vat)}</b></span>
       <span class="grand">합계 <b>${won(supply+vat)}</b></span>
-      <span>정산금 <b style="color:var(--primary)">${won(orderSettle(o))}</b></span>
+      ${orderCash(o)?`<span>현금수령 <b style="color:var(--stamp)">${won(orderCash(o))}</b> <span style="font-size:11px;color:var(--muted)">(원가 ${wonS(cost)} + 회사몫 ${wonS(margin-settleAmt(margin,orderRate(o)))} 차감)</span></span>`:''}
+      <span>정산금 <b class="${settleCls(orderSettle(o))}" style="${orderSettle(o)<0?'':'color:var(--primary)'}">${won(orderSettle(o))}</b></span>
     </div>
   </div>
   <div class="modal-f">
@@ -2348,8 +2349,8 @@ function drawMonthlySettle(){
   <table><thead><tr><th>직원</th>${months.map(m=>`<th class="num">${parseInt(m.slice(5))}월</th>`).join('')}<th class="num">누적 합계</th></tr></thead><tbody>
   ${rows.map(r=>`<tr>
     <td><b>${esc(r.u.name)}</b> <span style="font-size:11px;color:var(--muted)">${r.u.rate||0}%</span></td>
-    ${r.vals.map((v,i)=>`<td class="num" style="${i===r.vals.length-1?'font-weight:700;background:var(--primary-soft)':''}">${v?wonS(v):'-'}</td>`).join('')}
-    <td class="num" style="font-weight:800;color:var(--primary)">${wonS(r.total)}</td>
+    ${r.vals.map((v,i)=>`<td class="num ${settleCls(v)}" style="${i===r.vals.length-1?'font-weight:700;background:var(--primary-soft)':''}">${v?wonS(v):'-'}</td>`).join('')}
+    <td class="num ${settleCls(r.total)}" style="font-weight:800;${r.total<0?'':'color:var(--primary)'}">${wonS(r.total)}</td>
   </tr>`).join('')}
   </tbody></table>`;
 }
@@ -2366,7 +2367,10 @@ const orderRate = o => {
 };
 /* 정산율 출처: 'order' | 'client' | 'user' */
 const rateSource = o => hasVal(o.settleRate) ? 'order' : (hasVal(clientOf(o.clientId)?.settleRate) ? 'client' : 'user');
-const orderSettle = o => settleAmt(orderMargin(o), orderRate(o));
+const orderSettleBase = o => settleAmt(orderMargin(o), orderRate(o));
+const orderCash = o => o.cashReceived||0;
+const orderSettle = o => orderSettleBase(o) - orderCash(o);
+const settleCls = v => v<0 ? 'margin-neg' : '';
 function drawSettle(list){
   const isAdmin=currentUser.role==='admin';
   const staff=(isAdmin?users:[currentUser]).map(u=>{
@@ -2388,7 +2392,7 @@ function drawSettle(list){
     <td class="num" style="color:var(--amber)">${wonS(r.cost)}</td>
     <td class="num ${r.margin>=0?'margin-pos':'margin-neg'}" style="font-weight:700">${wonS(r.margin)}</td>
     <td class="num"><b>${r.u.rate||0}%</b></td>
-    <td class="num" style="font-weight:800;color:var(--primary)">${wonS(r.settle)}</td>
+    <td class="num ${settleCls(r.settle)}" style="font-weight:800;${r.settle<0?'':'color:var(--primary)'}">${wonS(r.settle)}</td>
     ${isAdmin?`<td style="text-align:right"><button class="mini-btn" onclick="event.stopPropagation();rateForm(${r.u.id})">정산율</button></td>`:''}
   </tr>`).join('')}
   </tbody></table>` : '<div class="empty">기간 내 정산할 주문이 없습니다.</div>';
@@ -2402,7 +2406,7 @@ function settleDetail(userId){
   document.getElementById('settleDetailTitle').textContent=`정산 상세 내역 · ${u?.name||''} (기본 정산율 ${u?.rate||0}%)`;
   const isAdmin=currentUser.role==='admin';
   document.getElementById('settleDetail').innerHTML = mine.length ? `
-  <table><thead><tr><th>등록일</th><th>거래처</th><th>품목</th><th class="num">매출</th><th class="num">원가</th><th class="num">마진</th><th class="num">정산율</th><th class="num">정산금</th><th>상태</th><th style="text-align:center;width:70px">입금</th></tr></thead><tbody>
+  <table><thead><tr><th>등록일</th><th>거래처</th><th>품목</th><th class="num">매출</th><th class="num">원가</th><th class="num">마진</th><th class="num">정산율</th><th class="num">현금수령</th><th class="num">정산금</th><th>상태</th><th style="text-align:center;width:70px">입금</th></tr></thead><tbody>
   ${mine.map(o=>{
     const sales=orderTotal(o), cost=orderCost(o), margin=sales-cost;
     const custom=(o.settleRate!==null&&o.settleRate!==undefined);
@@ -2419,12 +2423,17 @@ function settleDetail(userId){
         ?`<button class="mini-btn ${src!=='user'?'blue':''}" onclick="rateOrderForm(${o.id})" title="이 주문만 정산율 변경">${orderRate(o)}%${srcLbl}</button>`
         :`<span style="font-weight:700${src!=='user'?';color:var(--primary)':''}">${orderRate(o)}%${srcLbl}</span>`}
     </td>
-    <td class="num" style="font-weight:800;color:var(--primary)">${wonS(orderSettle(o))}</td>
+    <td class="num" onclick="event.stopPropagation()">
+      ${orderCash(o)
+        ?`<button class="mini-btn" style="color:var(--stamp);border-color:var(--stamp)" onclick="cashForm(${o.id})" title="${esc(o.cashMemo||'')}">−${wonS(orderCash(o))}</button>`
+        :`<button class="mini-btn" onclick="cashForm(${o.id})" title="현금 수령 등록">현금</button>`}
+    </td>
+    <td class="num ${settleCls(orderSettle(o))}" style="font-weight:800;${orderSettle(o)<0?'':'color:var(--primary)'}">${wonS(orderSettle(o))}</td>
     <td><span class="status-pill ${o.status==='완료'?'st-done':'st-ing'}">${o.status}</span></td>
     <td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" style="width:17px;height:17px;cursor:pointer" ${o.paid?'checked':''} onclick="event.preventDefault();confirmPaid(${o.id},${o.paid?'false':'true'})"></td>
   </tr>`;}).join('')}
   </tbody><tfoot><tr style="background:#FBFBF7;font-weight:800">
-    <td colspan="7" style="text-align:right">입금 완료 정산금 합계</td>
+    <td colspan="8" style="text-align:right">입금 완료 정산금 합계</td>
     <td class="num" style="color:var(--green)">${wonS(mine.filter(o=>o.paid).reduce((sum,o)=>sum+orderSettle(o),0))}</td>
     <td colspan="2" style="font-weight:600;color:var(--muted);font-size:12px">${mine.filter(o=>o.paid).length} / ${mine.length}건</td>
   </tr></tfoot></table>` : '<div class="empty">기간 내 주문이 없습니다.</div>';
@@ -2453,6 +2462,75 @@ function confirmPaid(id, checked){
     <button class="btn btn-primary" onclick="closeModal();togglePaid(${id},${checked})">${checked?'입금 완료':'해제'}</button>
   </div>`);
 }
+/* 현금 수령 등록: 직원이 거래처에서 직접 받은 현금 → 정산금에서 차감 */
+function cashForm(id){
+  const o=orders.find(x=>x.id===id); if(!o) return;
+  const u=userOf(o.userId);
+  if(currentUser.role!=='admin' && o.userId!==currentUser.id){ toast('본인 담당 주문만 등록할 수 있습니다'); return; }
+  const sales=orderTotal(o), cost=orderCost(o), margin=sales-cost, rate=orderRate(o);
+  const grand=sales+Math.round(sales*0.1);
+  const empShare=settleAmt(margin,rate), coShare=margin-empShare;
+  const cur=orderCash(o);
+  openModal(`
+  <div class="modal-h"><h3>💵 현금 수령 등록</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-b">
+    <div style="background:var(--amber-soft);color:var(--amber);font-size:12.5px;font-weight:600;padding:10px 12px;border-radius:8px;margin-bottom:14px">
+      직원이 거래처에서 매출액을 현금으로 직접 받은 경우입니다. 매출 전액이 직원에게 있으므로 <b>원가 + 회사 몫 정산금</b>을 정산에서 차감(마이너스)합니다.
+    </div>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px;margin-bottom:14px">
+      <b style="color:var(--muted)">거래처</b><span>${esc(clientOf(o.clientId)?.name||'-')}</span>
+      <b style="color:var(--muted)">품목</b><span>${esc(o.items[0].name)}${o.items.length>1?` 외 ${o.items.length-1}건`:''}</span>
+      <b style="color:var(--muted)">담당자</b><span>${esc(u?.name||'-')} (정산율 ${rate}%)</span>
+    </div>
+    <div class="field"><label>직원이 받은 현금 (원)</label>
+      <input id="f_cash" type="number" min="0" value="${cur||sales}" oninput="cashRecalc(${sales},${cost},${empShare})">
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="mini-btn" onclick="document.getElementById('f_cash').value=${sales};cashRecalc(${sales},${cost},${empShare})">공급가 ${wonS(sales)}</button>
+        <button class="mini-btn" onclick="document.getElementById('f_cash').value=${grand};cashRecalc(${sales},${cost},${empShare})">VAT 포함 ${wonS(grand)}</button>
+      </div>
+    </div>
+    <table style="margin-bottom:12px;font-size:13px"><tbody>
+      <tr><td>직원 수령 현금</td><td class="num" id="cp_cash">${wonS(cur||sales)}</td></tr>
+      <tr><td style="color:var(--muted)">　원가 (공급사 지급분) 차감</td><td class="num" style="color:var(--amber)">−${wonS(cost)}</td></tr>
+      <tr><td style="color:var(--muted)">　회사 몫 정산금 (마진의 ${100-rate}%) 차감</td><td class="num" style="color:var(--amber)">−${wonS(coShare)}</td></tr>
+      <tr><td style="color:var(--muted)">　직원 몫 정산금 (마진의 ${rate}%)</td><td class="num" style="color:var(--green)">+${wonS(empShare)}</td></tr>
+      <tr id="cp_extraRow" style="display:none"><td style="color:var(--muted)">　공급가 초과 수령분 (VAT 등) 차감</td><td class="num" style="color:var(--amber)" id="cp_extra"></td></tr>
+      <tr style="background:#FBFBF7;font-weight:800"><td>직원 정산금 (차감 후)</td><td class="num" id="cashPreview" style="color:var(--stamp)">${won(empShare-(cur||sales))}</td></tr>
+    </tbody></table>
+    <div class="field"><label>메모</label><input id="f_cashMemo" value="${esc(o.cashMemo||'')}" placeholder="예: 10/16 현장에서 현금 수령"></div>
+    <div style="font-size:12px;color:var(--muted)">마이너스 금액은 직원이 회사에 입금해야 할 금액입니다.</div>
+  </div>
+  <div class="modal-f">
+    ${cur?`<button class="btn btn-ghost" style="margin-right:auto;color:var(--stamp)" onclick="saveCash(${id},0)">현금 수령 해제</button>`:''}
+    <button class="btn btn-ghost" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveCash(${id})">저장</button>
+  </div>`);
+}
+function cashRecalc(sales,cost,empShare){
+  const v=parseInt(document.getElementById('f_cash').value)||0;
+  document.getElementById('cp_cash').textContent=wonS(v);
+  const extra=v-sales;
+  const row=document.getElementById('cp_extraRow');
+  if(extra>0){ row.style.display=''; document.getElementById('cp_extra').textContent='−'+wonS(extra); }
+  else row.style.display='none';
+  const res=empShare-v;
+  const el=document.getElementById('cashPreview');
+  el.textContent=won(res); el.style.color=res<0?'var(--stamp)':'var(--primary)';
+}
+async function saveCash(id, reset){
+  let amt, memo='';
+  if(reset===0){ amt=0; }
+  else{
+    amt=parseInt(document.getElementById('f_cash').value)||0;
+    memo=document.getElementById('f_cashMemo').value.trim();
+    if(amt<0){ toast('0 이상의 금액을 입력하세요'); return; }
+  }
+  try{ await dbUpd('orders',id,{cashReceived:amt, cashMemo:memo}); }catch(e){ return; }
+  const o=orders.find(x=>x.id===id); if(o){ o.cashReceived=amt; o.cashMemo=memo; }
+  closeModal(); drawErp();
+  toast(amt?'현금 수령을 등록했습니다 (정산금에서 차감)':'현금 수령을 해제했습니다');
+}
+
 /* 주문별 정산율 개별 지정 (슈퍼어드민) */
 function rateOrderForm(id){
   if(currentUser.role!=='admin'){ toast('정산율 변경은 슈퍼어드민만 가능합니다'); return; }
@@ -2561,20 +2639,21 @@ function exportExcel(){
   list=[...list].sort((a,b)=>a.date.localeCompare(b.date));
 
   /* 시트1: 주문 내역 (정산금 = 해당 주문 마진 × 담당자 정산율) */
-  const rows1=[['등록일','거래처','담당자','품목','시작일','마감일','공급가','원가','부가세','합계','정산율(%)','정산금','입금여부']];
+  const rows1=[['등록일','거래처','담당자','품목','시작일','마감일','공급가','원가','부가세','합계','정산율(%)','현금수령','정산금','입금여부']];
   list.forEach(o=>{
     const u=userOf(o.userId);
     const sales=orderTotal(o), cost=orderCost(o), margin=sales-cost, vat=Math.round(sales*0.1);
     rows1.push([o.date, clientOf(o.clientId)?.name||'-', u?.name||'-',
       o.items.map(i=>`${i.name} x${i.qty}`).join(', '),
-      o.startDate, o.dueDate, sales, cost, vat, sales+vat, orderRate(o), orderSettle(o),
+      o.startDate, o.dueDate, sales, cost, vat, sales+vat, orderRate(o), orderCash(o)?-orderCash(o):0, orderSettle(o),
       o.paid?'입금완료':'입금대기']);
   });
   const tSales=list.reduce((s,o)=>s+orderTotal(o),0), tCost=list.reduce((s,o)=>s+orderCost(o),0);
   const tSettle=list.reduce((s,o)=>s+orderSettle(o),0);
   const paidCnt=list.filter(o=>o.paid).length;
   rows1.push([]);
-  rows1.push(['합계','','','','','',tSales,tCost,Math.round(tSales*0.1),tSales+Math.round(tSales*0.1),'',tSettle,`입금완료 ${paidCnt}/${list.length}건`]);
+  const tCash=list.reduce((s,o)=>s+orderCash(o),0);
+  rows1.push(['합계','','','','','',tSales,tCost,Math.round(tSales*0.1),tSales+Math.round(tSales*0.1),'',tCash?-tCash:0,tSettle,`입금완료 ${paidCnt}/${list.length}건`]);
 
   /* 시트2: 직원별 정산 */
   const staffIds=[...new Set(list.map(o=>o.userId))];
@@ -2593,7 +2672,7 @@ function exportExcel(){
 
   const wb=XLSX.utils.book_new();
   const ws1=XLSX.utils.aoa_to_sheet(rows1);
-  ws1['!cols']=[{wch:11},{wch:16},{wch:9},{wch:38},{wch:11},{wch:11},{wch:13},{wch:12},{wch:12},{wch:14},{wch:10},{wch:12},{wch:11}];
+  ws1['!cols']=[{wch:11},{wch:16},{wch:9},{wch:38},{wch:11},{wch:11},{wch:13},{wch:12},{wch:12},{wch:14},{wch:10},{wch:12},{wch:12},{wch:11}];
   const ws2=XLSX.utils.aoa_to_sheet(rows2);
   ws2['!cols']=[{wch:10},{wch:10},{wch:10},{wch:13},{wch:12},{wch:12},{wch:15}];
   XLSX.utils.book_append_sheet(wb, ws1, '주문내역');
