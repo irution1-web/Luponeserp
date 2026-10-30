@@ -373,7 +373,7 @@ tr.selected{background:var(--primary-soft)!important}
 /* ============================================================
    데이터 (브라우저 메모리 저장 — 새로고침 시 초기화)
 ============================================================ */
-const today = new Date(); today.setHours(0,0,0,0);
+Object.defineProperty(window,'today',{get(){ const d=new Date(); d.setHours(0,0,0,0); return d; }});
 function ymd(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); } // 로컬 기준 날짜 문자열 (UTC 변환 X)
 function dstr(offset){ const d=new Date(today); d.setDate(d.getDate()+offset); return ymd(d); }
 
@@ -511,9 +511,15 @@ function startDeadlineReminder(){
   reminderTimer=setInterval(checkReminderSlots, 60*1000);
   checkReminderSlots();
 }
+let lastDateStr=null;
 function checkReminderSlots(){
   if(!currentUser) return;
   const now=new Date(); const h=now.getHours();
+  const ds=ymd(now);
+  if(lastDateStr && lastDateStr!==ds){ // 날짜가 바뀜 → 현재 화면 다시 그리기
+    lastDateStr=ds; try{ renderBell(); go(currentPage, null, true); }catch(e){}
+  }
+  lastDateStr=ds;
   for(const rh of REMIND_HOURS){
     if(h>=rh && !remindDone('h'+rh)){
       markRemind('h'+rh);
