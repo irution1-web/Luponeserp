@@ -2238,17 +2238,6 @@ function renderErpUI(){
     <div class="card"><div class="card-h"><h3>거래처별 매출 순위</h3></div><div class="card-b flush" id="erpRank"></div></div>
   </div>
   <div class="card" style="margin-top:16px">
-    <div class="card-h"><h3>📦 상품별 판매 현황</h3>
-      <div style="display:flex;align-items:center;gap:8px">
-        <select id="prodSalesStaff" onchange="drawProductSales()" style="width:130px;padding:6px 10px;font-size:13px;${currentUser.role==='admin'?'':'display:none'}">
-          <option value="">전체 직원</option>${users.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}
-        </select>
-        <span style="font-size:12px;color:var(--muted)">상품을 클릭하면 거래처별 내역이 펼쳐집니다</span>
-      </div>
-    </div>
-    <div class="card-b flush" id="erpProductSales"></div>
-  </div>
-  <div class="card" style="margin-top:16px">
     <div class="card-h"><h3>📅 월별 적립 정산금</h3><span style="font-size:12px;color:var(--muted)">최근 6개월 · 월별로 쌓인 정산금 합계</span></div>
     <div class="card-b flush" id="erpMonthly"></div>
   </div>
@@ -2346,81 +2335,8 @@ function drawErp(){
   </tbody></table>` : '<div class="empty">기간 내 매출 데이터가 없습니다.</div>';
 
   drawSettle(list);
-  drawProductSales();
   drawMonthlySettle();
   if(settleSelUser && (currentUser.role==='admin'||settleSelUser===currentUser.id)) settleDetail(settleSelUser);
-}
-
-/* 상품별 판매 현황 (기간·상태·기준 필터 적용) */
-let openProdRows=new Set();
-function drawProductSales(){
-  const {list}=erpFiltered();
-  const sf=parseInt(document.getElementById('prodSalesStaff')?.value)||0;
-  const src=sf?list.filter(o=>o.userId===sf):list;
-
-  // 상품별 집계 (productId 기준, 없으면 이름 기준)
-  const agg={};
-  src.forEach(o=>{
-    (o.items||[]).forEach(it=>{
-      const key=it.productId?('p'+it.productId):('n'+it.name);
-      if(!agg[key]) agg[key]={key, productId:it.productId||null, name:it.name, qty:0, sales:0, orders:new Set(), clients:{}};
-      const a=agg[key];
-      a.qty+=it.qty; a.sales+=it.price*it.qty; a.orders.add(o.id);
-      const cid=o.clientId;
-      if(!a.clients[cid]) a.clients[cid]={cid, qty:0, sales:0, cnt:0, last:''};
-      a.clients[cid].qty+=it.qty; a.clients[cid].sales+=it.price*it.qty; a.clients[cid].cnt++;
-      if(o.date>a.clients[cid].last) a.clients[cid].last=o.date;
-    });
-  });
-  const rows=Object.values(agg).sort((a,b)=>b.sales-a.sales);
-  const totalSales=rows.reduce((t,r)=>t+r.sales,0);
-  const totalQty=rows.reduce((t,r)=>t+r.qty,0);
-
-  const catName=pid=>{ const p=products.find(x=>x.id===pid); const c=p&&categories.find(x=>x.id===p.catId); return c?c.name:''; };
-
-  document.getElementById('erpProductSales').innerHTML = rows.length ? `
-  <table><thead><tr>
-    <th style="width:44px">순위</th><th>상품</th><th>카테고리</th><th class="num">판매 수량</th><th class="num">주문 건수</th><th class="num">매출</th><th class="num">평균 단가</th><th style="width:110px">점유율</th>
-  </tr></thead><tbody>
-  ${rows.map((r,i)=>{
-    const share=totalSales?Math.round(r.sales/totalSales*100):0;
-    const open=openProdRows.has(r.key);
-    const cl=Object.values(r.clients).sort((a,b)=>b.sales-a.sales);
-    return `<tr style="cursor:pointer" onclick="toggleProdRow('${r.key}')">
-      <td><span class="rank-num ${i===0?'top':''}">${i+1}</span></td>
-      <td><b>${esc(r.name)}</b> <span style="font-size:11px;color:var(--muted)">${open?'▲':'▼'}</span></td>
-      <td style="color:var(--muted)">${esc(catName(r.productId))||'-'}</td>
-      <td class="num"><b>${r.qty.toLocaleString()}</b></td>
-      <td class="num">${r.orders.size}</td>
-      <td class="num"><b>${wonS(r.sales)}</b></td>
-      <td class="num" style="color:var(--muted)">${r.qty?wonS(Math.round(r.sales/r.qty)):'-'}</td>
-      <td><span style="font-size:12px;font-weight:700">${share}%</span><div class="share-bar"><i style="width:${share}%"></i></div></td>
-    </tr>
-    ${open?`<tr><td colspan="8" style="padding:0 12px 12px 56px;background:#FBFBF9">
-      <table style="background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden">
-        <thead><tr><th>거래처</th><th>담당자</th><th class="num">수량</th><th class="num">건수</th><th class="num">매출</th><th>최근 주문일</th></tr></thead><tbody>
-        ${cl.map(c=>{ const cc=clientOf(c.cid); return `<tr>
-          <td><b>${esc(cc?.name||'-')}</b></td>
-          <td>${esc(userOf(cc?.userId)?.name||'-')}</td>
-          <td class="num">${c.qty.toLocaleString()}</td>
-          <td class="num">${c.cnt}</td>
-          <td class="num"><b>${wonS(c.sales)}</b></td>
-          <td style="color:var(--muted)">${c.last}</td>
-        </tr>`;}).join('')}
-        </tbody></table>
-    </td></tr>`:''}`;
-  }).join('')}
-  </tbody><tfoot><tr style="background:#FBFBF7;font-weight:800">
-    <td colspan="3">합계 · ${rows.length}개 상품</td>
-    <td class="num">${totalQty.toLocaleString()}</td>
-    <td class="num">${src.length}</td>
-    <td class="num">${wonS(totalSales)}</td>
-    <td colspan="2"></td>
-  </tr></tfoot></table>` : '<div class="empty">기간 내 판매된 상품이 없습니다.</div>';
-}
-function toggleProdRow(key){
-  if(openProdRows.has(key)) openProdRows.delete(key); else openProdRows.add(key);
-  drawProductSales();
 }
 
 /* 월별 적립 정산금 (기간 필터와 무관하게 최근 6개월) */
@@ -2771,18 +2687,6 @@ function exportExcel(){
   ws2['!cols']=[{wch:10},{wch:10},{wch:10},{wch:13},{wch:12},{wch:12},{wch:15}];
   XLSX.utils.book_append_sheet(wb, ws1, '주문내역');
   XLSX.utils.book_append_sheet(wb, ws2, '직원별정산');
-  /* 시트3: 상품별 판매 */
-  const pagg={};
-  list.forEach(o=>(o.items||[]).forEach(it=>{
-    const k=it.productId?('p'+it.productId):('n'+it.name);
-    if(!pagg[k]) pagg[k]={name:it.name, qty:0, sales:0, orders:new Set()};
-    pagg[k].qty+=it.qty; pagg[k].sales+=it.price*it.qty; pagg[k].orders.add(o.id);
-  }));
-  const rows3=[['상품','판매 수량','주문 건수','매출','평균 단가']];
-  Object.values(pagg).sort((a,b)=>b.sales-a.sales).forEach(r=>rows3.push([r.name, r.qty, r.orders.size, r.sales, r.qty?Math.round(r.sales/r.qty):0]));
-  const ws3=XLSX.utils.aoa_to_sheet(rows3);
-  ws3['!cols']=[{wch:28},{wch:11},{wch:10},{wch:13},{wch:12}];
-  XLSX.utils.book_append_sheet(wb, ws3, '상품별판매');
   const staffTag = staffId ? `_${userOf(staffId)?.name||''}` : '';
   XLSX.writeFile(wb, `루폰스_매출정산${staffTag}_${from.replace(/-/g,'')}-${to.replace(/-/g,'')}.xlsx`);
   closeModal(); toast('엑셀 파일을 다운로드했습니다');
